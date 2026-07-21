@@ -1,5 +1,6 @@
 package com.app.tably.member.service;
 
+import com.app.tably.member.entity.Member;
 import com.app.tably.member.repository.MemberRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +18,8 @@ public class MemberService {
 //    private final PasswordEncoder passwordEncoder;
 
     @Transactional
-    public Long signUp(Member member) {}
+    public Long signUp(Member member) {
+        return memberRepository.save(member).getId();
+    }
 
 }
