@@ -24,6 +24,8 @@
 ## 코드 규칙
 
 - 패키지: com.app.tably 하위에 도메인별 구성 (member, restaurant, reservation, payment, waiting)
+- 패키지: com.app.tably.{도메인} 하위를 entity / repository / service / controller / dto 로 구분
+- enum은 소속 엔티티와 같은 entity 패키지에 둔다 (별도 패키지 금지)
 - 응답: 통일된 ApiResponse 포맷 사용 (정의 후 이 문서에 추가)
 - 예외: 커스텀 예외 + @RestControllerAdvice 전역 처리
 - 주석은 "왜"만 남긴다. "무엇"을 설명하는 주석 금지
