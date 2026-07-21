@@ -121,7 +121,7 @@ const mockReservations = new Map()
 //   })
 //   return request(`/api/reservations/${reservationId}`)
 //   // 409 SLOT_ALREADY_TAKEN / SLOT_CLOSED → "방금 마감되었습니다" 처리
-export async function holdSlot(slot, partySize, depositAmount) {
+export async function holdSlot(restaurant, slot, partySize, depositAmount) {
   await delay(300)
   if (slot.status !== 'OPEN' || mockClosedSlotIds.has(slot.id)) {
     throw new ApiError(409, 'SLOT_ALREADY_TAKEN', '방금 마감되었습니다.')
@@ -130,12 +130,15 @@ export async function holdSlot(slot, partySize, depositAmount) {
   const reservation = {
     id: mockSeq--,
     slotId: slot.id,
+    restaurantId: restaurant.id,
+    restaurantName: restaurant.name,
     slotDate: slot.slotDate,
     slotTime: slot.slotTime,
     tableNo: slot.tableNo,
     partySize,
     depositAmount,
     status: 'PENDING_PAYMENT',
+    heldAt: new Date().toISOString().slice(0, 19),
     expiresAt: Date.now() + HOLD_DURATION_MS,
   }
   mockReservations.set(reservation.id, reservation)
@@ -166,6 +169,41 @@ export async function payDeposit({ reservationId, amount, idempotencyKey }) {
   }
   reservation.status = 'CONFIRMED'
   return { ...reservation }
+}
+
+// 내 예약 목록 — 실제 API(GET /api/reservations/my)에 목 선점·결제 건을 병합한다.
+// 목 예약은 백엔드에 없어서 병합하지 않으면 데모 흐름(예약 → 내 예약에서 취소)이 끊긴다.
+// 백엔드 선점·결제 구현 후: 병합을 제거하고 실제 목록만 반환하면 된다.
+export async function getMyReservations() {
+  const real = await request('/api/reservations/my')
+  const mocks = [...mockReservations.values()]
+    .filter((r) => r.status !== 'EXPIRED')
+    .map((r) => ({ ...r }))
+  return [...mocks, ...real].sort((a, b) => (a.heldAt < b.heldAt ? 1 : -1))
+}
+
+// 예약 취소 — 실제 API 우선. 목 예약(id 음수)은 로컬에서 취소 처리한다.
+// 백엔드 구현 후: 목 분기(id < 0)를 제거하면 된다.
+//   실제 호출: POST /api/reservations/{id}/cancel (응답 data 없음)
+export async function cancelReservation(reservationId) {
+  if (reservationId > 0) {
+    return request(`/api/reservations/${reservationId}/cancel`, { method: 'POST' })
+  }
+  await delay(300)
+  const reservation = mockReservations.get(reservationId)
+  if (!reservation) throw new ApiError(404, 'RESERVATION_NOT_FOUND', '존재하지 않는 예약입니다.')
+  if (!['PENDING_PAYMENT', 'CONFIRMED'].includes(reservation.status)) {
+    throw new ApiError(409, 'INVALID_STATUS_TRANSITION', '취소할 수 없는 상태입니다.')
+  }
+  reservation.status = 'CANCELED_BY_USER'
+  mockClosedSlotIds.delete(reservation.slotId) // 취소된 슬롯은 다시 예약 가능
+  return null
+}
+
+// 예약별 결제 이력 — 실제 API. 실제 예약의 결제액 산정에 사용
+// (목 예약은 depositAmount를 직접 갖고 있어 호출하지 않는다)
+export function getPaymentsFor(reservationId) {
+  return request(`/api/payments/reservations/${reservationId}`)
 }
 
 // ── 웨이팅 (② 화면에서 사용) ─────────────────────────────────────────

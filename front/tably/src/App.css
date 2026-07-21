@@ -817,6 +817,77 @@ button.ghost:disabled {
   background: var(--success);
 }
 
+/* ── 내 예약 ──────────────────────────── */
+.reservation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reservation-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.reservation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.reservation-head .name {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.reservation-info {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.cancel-btn {
+  margin-top: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--error);
+  background: none;
+  border: 1px solid var(--error-border);
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.cancel-btn:hover {
+  background: var(--error-bg);
+}
+
+.empty-state {
+  text-align: center;
+}
+
+.empty-state p {
+  margin: 0 0 14px;
+  color: var(--muted);
+}
+
+.refund {
+  color: var(--success);
+}
+
+.refund.zero {
+  color: var(--error);
+}
+
+button.primary.danger {
+  background: linear-gradient(180deg, #c4503f, var(--error));
+}
+
 /* ── 웨이팅 ───────────────────────────── */
 .waiting-desc {
   margin: 0 0 18px;
