@@ -58,7 +58,13 @@ function findSlot(slotId) {
 //   GET /api/restaurants/{restaurantId}/slots?date=YYYY-MM-DD
 export async function getSlots(restaurantId, date) {
   await delay(250)
-  return slotsFor(date).map(({ _sniped, ...slot }) => ({ ...slot }))
+  // _sniped 같은 목 내부 필드는 응답에서 제외한다
+  return slotsFor(date).map(({ slotId, time, tableNo, status }) => ({
+    slotId,
+    time,
+    tableNo,
+    status,
+  }))
 }
 
 // 슬롯 선점 (FR-04) — 이미 선점된 슬롯이면 409 "방금 마감되었습니다"
@@ -111,6 +117,17 @@ export async function payDeposit(reservationId) {
 // ── 웨이팅 (FR-14~16) — 2단계 웨이팅 화면에서 사용 ───────────────────
 let currentWaiting = null
 
+// _registeredAt 같은 목 내부 필드를 뺀 응답 형태
+function publicWaiting(w) {
+  return {
+    waitingId: w.waitingId,
+    number: w.number,
+    partySize: w.partySize,
+    aheadCount: w.aheadCount,
+    status: w.status,
+  }
+}
+
 // 웨이팅 등록 (FR-14)
 // 백엔드 완성 후 실제 fetch로 교체:
 //   POST /api/waitings  body: { restaurantId, partySize }
@@ -125,8 +142,7 @@ export async function registerWaiting(restaurantId, partySize) {
     _registeredAt: Date.now(),
     _calledAt: null,
   }
-  const { _registeredAt, _calledAt, ...pub } = currentWaiting
-  return { ...pub }
+  return publicWaiting(currentWaiting)
 }
 
 // 내 순번 조회 — 폴링용 (FR-15), 호출·만료 상태 반영 (FR-16)
@@ -150,6 +166,5 @@ export async function getWaitingStatus(waitingId) {
   if (w.status === 'CALLED' && Date.now() - w._calledAt > CALL_DURATION_MS) {
     w.status = 'EXPIRED' // 호출 후 10분 내 도착 확인 없음 → 순번 넘어감
   }
-  const { _registeredAt, _calledAt, ...pub } = w
-  return { ...pub }
+  return publicWaiting(w)
 }
