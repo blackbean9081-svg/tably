@@ -23,7 +23,11 @@ public enum ErrorCode {
     // restaurant
     RESTAURANT_NOT_FOUND(HttpStatus.NOT_FOUND, "식당을 찾을 수 없습니다."),
     POLICY_NOT_FOUND(HttpStatus.NOT_FOUND, "예약 정책이 설정되지 않은 식당입니다."),
-    NOT_RESTAURANT_OWNER(HttpStatus.FORBIDDEN, "해당 식당의 사장만 가능한 작업입니다.");
+    NOT_RESTAURANT_OWNER(HttpStatus.FORBIDDEN, "해당 식당의 사장만 가능한 작업입니다."),
+
+    // slot
+    SLOT_NOT_FOUND(HttpStatus.NOT_FOUND, "슬롯을 찾을 수 없습니다."),
+    SLOT_ALREADY_GENERATED(HttpStatus.CONFLICT, "해당 월의 슬롯이 이미 생성되어 있습니다.");
 
     private final HttpStatus status;
     private final String message;
