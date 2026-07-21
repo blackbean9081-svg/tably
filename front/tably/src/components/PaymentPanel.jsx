@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { payDeposit } from '../api'
 
 const remainingOf = (expiresAt) => Math.max(0, expiresAt - Date.now())
+const hhmm = (t) => t.slice(0, 5)
 
 export default function PaymentPanel({ reservation, onPaid, onError, onExpire }) {
   const [remaining, setRemaining] = useState(() => remainingOf(reservation.expiresAt))
   const [paying, setPaying] = useState(false)
+  // 결제 재시도 시에도 같은 키를 보내 이중 청구를 막는다 (PaymentApproveRequestDto.idempotencyKey)
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
 
   useEffect(() => {
     const timer = setInterval(() => setRemaining(remainingOf(reservation.expiresAt)), 1000)
@@ -23,7 +26,13 @@ export default function PaymentPanel({ reservation, onPaid, onError, onExpire })
     if (paying) return // 중복 클릭 방지 (백엔드 멱등성과 별개의 UI 가드)
     setPaying(true)
     try {
-      onPaid(await payDeposit(reservation.reservationId))
+      onPaid(
+        await payDeposit({
+          reservationId: reservation.id,
+          amount: reservation.depositAmount,
+          idempotencyKey,
+        }),
+      )
     } catch (e) {
       onError(e)
     }
@@ -36,7 +45,7 @@ export default function PaymentPanel({ reservation, onPaid, onError, onExpire })
         <div>
           <dt>일시</dt>
           <dd>
-            {reservation.date} {reservation.time}
+            {reservation.slotDate} {hhmm(reservation.slotTime)}
           </dd>
         </div>
         <div>

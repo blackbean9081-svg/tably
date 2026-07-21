@@ -1,170 +1,223 @@
-// tably API 레이어 — 현재는 전부 목(mock) 구현이다.
-// 백엔드가 아직 미구현이라 화면 개발용으로 메모리 상의 가짜 데이터를 반환한다.
-// 계약 초안 근거: docs/requirements.md FR-03~07(예약·결제), FR-14~16(웨이팅).
-// 백엔드 완성 후 이 파일의 각 함수 본문만 실제 fetch로 교체하면
-// 화면 코드는 수정 없이 그대로 연동된다.
+// tably API 레이어 (단일 파일)
+//
+// 실제 백엔드(http://localhost:8080, vite dev 프록시 /api 경유) 호출이 기본이고,
+// 백엔드 핵심영역이 미구현(UnsupportedOperationException → 500)인 아래 3건만 목(mock)이다:
+//   - 슬롯 선점  POST /api/reservations   (핵심영역 1) → 전체 목
+//   - 예약금 결제 POST /api/payments       (핵심영역 2) → 전체 목
+//   - 웨이팅 등록 POST /api/waitings       (핵심영역 6) → 실제 시도 후 500이면 목 폴백
+// 각 함수의 "백엔드 구현 후 실제 호출로 교체" 주석을 참고해 교체하면 된다.
+//
+// 응답 envelope: { success: true, data } | { success: false, error: { code, message } }
 
-export const RESTAURANT = { id: 1, name: '스시 준', depositPerPerson: 20000 }
+const SEED_ACCOUNT = { email: 'guest@tably.com', password: 'password123!' }
 
 export class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, code, message) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
-const HOLD_DURATION_MS = 10 * 60 * 1000 // 슬롯 선점 유지 시간 10분 (FR-05)
-const CALL_DURATION_MS = 10 * 60 * 1000 // 웨이팅 호출 후 도착 대기 10분 (FR-16)
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+// ── 공통: 자동 로그인 + 인증 fetch ───────────────────────────────────
+let accessToken = null
 
-// ── 목 저장소 (모듈 메모리 — 새로고침하면 초기화된다) ─────────────────
-const TIMES = ['18:00', '20:30']
-const TABLE_COUNT = 4
-const slotsByDate = new Map() // date → slot[]
-const reservations = new Map() // reservationId → reservation
-let nextReservationId = 1
-
-function slotsFor(date) {
-  if (!slotsByDate.has(date)) {
-    const slots = []
-    for (const time of TIMES) {
-      for (let tableNo = 1; tableNo <= TABLE_COUNT; tableNo++) {
-        slots.push({
-          slotId: `${date}-${time}-${tableNo}`,
-          time,
-          tableNo,
-          // 시연용 초기 상태: 20:30 타임 2·3번 테이블은 이미 마감
-          status:
-            time === '20:30' && (tableNo === 2 || tableNo === 3)
-              ? 'RESERVED'
-              : 'AVAILABLE',
-          // 18:00 3번 테이블은 목록에서는 비어 보이지만 선점 시도 순간
-          // 다른 손님이 한발 앞선 오픈런 경쟁 상황(409)을 재현한다
-          _sniped: time === '18:00' && tableNo === 3,
-        })
-      }
-    }
-    slotsByDate.set(date, slots)
+async function login() {
+  const res = await fetch('/api/members/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(SEED_ACCOUNT),
+  })
+  let body = null
+  try {
+    body = await res.json()
+  } catch {
+    // 비정상 응답(빈 본문 등)은 아래 공통 에러로 처리
   }
-  return slotsByDate.get(date)
+  if (!res.ok || !body?.success) {
+    throw new ApiError(
+      res.status,
+      body?.error?.code ?? 'LOGIN_FAILED',
+      body?.error?.message ?? '자동 로그인에 실패했습니다. 백엔드 상태를 확인해주세요.',
+    )
+  }
+  accessToken = body.data.accessToken
 }
 
-function findSlot(slotId) {
-  return slotsFor(slotId.slice(0, 10)).find((s) => s.slotId === slotId)
+// envelope 해석 + Bearer 첨부. 토큰 만료(401) 시 1회 재로그인 후 재시도.
+async function request(path, options = {}, retried = false) {
+  if (!accessToken) await login()
+  const res = await fetch(path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      ...options.headers,
+    },
+  })
+  if (res.status === 401 && !retried) {
+    accessToken = null
+    return request(path, options, true)
+  }
+  let body = null
+  try {
+    body = await res.json()
+  } catch {
+    // 본문 없는 오류 응답
+  }
+  if (!res.ok || !body?.success) {
+    throw new ApiError(
+      res.status,
+      body?.error?.code ?? 'UNKNOWN',
+      body?.error?.message ?? `요청에 실패했습니다. (HTTP ${res.status})`,
+    )
+  }
+  return body.data
 }
 
-// 슬롯 조회 (FR-03)
-// 백엔드 완성 후 실제 fetch로 교체:
-//   GET /api/restaurants/{restaurantId}/slots?date=YYYY-MM-DD
+// ── 실제 API ─────────────────────────────────────────────────────────
+
+// 앱 시작 시: 자동 로그인 → 「스시 준」 식당·예약 정책 조회
+export async function bootstrap() {
+  await login()
+  const restaurants = await request('/api/restaurants')
+  const restaurant = restaurants.find((r) => r.name === '스시 준') ?? restaurants[0]
+  if (!restaurant) {
+    throw new ApiError(404, 'RESTAURANT_NOT_FOUND', '시드 식당이 없습니다. 백엔드 시드 데이터를 확인해주세요.')
+  }
+  const policy = await request(`/api/restaurants/${restaurant.id}/policy`)
+  return { restaurant, policy }
+}
+
+// 슬롯 조회 — 실제 API.
+// 단, 목으로 선점된 슬롯은 백엔드가 모르므로 CLOSED로 덧씌워 화면 흐름을 유지한다.
+// (선점이 실제 구현되면 mockClosedSlotIds 덧씌우기는 제거)
+const mockClosedSlotIds = new Set()
+
 export async function getSlots(restaurantId, date) {
-  await delay(250)
-  // _sniped 같은 목 내부 필드는 응답에서 제외한다
-  return slotsFor(date).map(({ slotId, time, tableNo, status }) => ({
-    slotId,
-    time,
-    tableNo,
-    status,
-  }))
+  const slots = await request(`/api/restaurants/${restaurantId}/slots?date=${date}`)
+  return slots.map((s) => (mockClosedSlotIds.has(s.id) ? { ...s, status: 'CLOSED' } : s))
 }
 
-// 슬롯 선점 (FR-04) — 이미 선점된 슬롯이면 409 "방금 마감되었습니다"
-// 백엔드 완성 후 실제 fetch로 교체:
-//   POST /api/reservations  body: { slotId, partySize }
-export async function holdSlot(slotId, partySize) {
-  await delay(400)
-  const slot = findSlot(slotId)
-  if (!slot) throw new ApiError(404, '존재하지 않는 슬롯입니다.')
-  if (slot._sniped && slot.status === 'AVAILABLE') {
-    slot.status = 'RESERVED' // 다른 손님이 한발 먼저 선점한 상황
-    throw new ApiError(409, '방금 마감되었습니다.')
+// ── 목 폴백 ──────────────────────────────────────────────────────────
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const HOLD_DURATION_MS = 10 * 60 * 1000 // 선점 후 결제 대기 10분 (FR-05)
+let mockSeq = -1 // 실제 백엔드 id(양수)와 구분되도록 음수 사용
+const mockReservations = new Map()
+
+// [목] 슬롯 선점 — 핵심영역 1 미구현(500)이라 전체를 목으로 대체했다.
+// 백엔드 구현 후 실제 호출로 교체:
+//   const reservationId = await request('/api/reservations', {
+//     method: 'POST',
+//     body: JSON.stringify({ slotId: slot.id, partySize }),
+//   })
+//   return request(`/api/reservations/${reservationId}`)
+//   // 409 SLOT_ALREADY_TAKEN / SLOT_CLOSED → "방금 마감되었습니다" 처리
+export async function holdSlot(slot, partySize, depositAmount) {
+  await delay(300)
+  if (slot.status !== 'OPEN' || mockClosedSlotIds.has(slot.id)) {
+    throw new ApiError(409, 'SLOT_ALREADY_TAKEN', '방금 마감되었습니다.')
   }
-  if (slot.status !== 'AVAILABLE') throw new ApiError(409, '방금 마감되었습니다.')
-  slot.status = 'HELD'
+  mockClosedSlotIds.add(slot.id)
   const reservation = {
-    reservationId: nextReservationId++,
-    slotId,
-    date: slotId.slice(0, 10),
-    time: slot.time,
+    id: mockSeq--,
+    slotId: slot.id,
+    slotDate: slot.slotDate,
+    slotTime: slot.slotTime,
     tableNo: slot.tableNo,
     partySize,
-    depositAmount: RESTAURANT.depositPerPerson * partySize,
+    depositAmount,
     status: 'PENDING_PAYMENT',
     expiresAt: Date.now() + HOLD_DURATION_MS,
   }
-  reservations.set(reservation.reservationId, reservation)
+  mockReservations.set(reservation.id, reservation)
   return { ...reservation }
 }
 
-// 예약금 결제 (FR-06) — 이미 결제된 예약이면 같은 결과를 다시 반환(멱등성)
-// 백엔드 완성 후 실제 fetch로 교체:
-//   POST /api/reservations/{reservationId}/payment
-export async function payDeposit(reservationId) {
+// [목] 예약금 결제 — 핵심영역 2 미구현(500)이라 전체를 목으로 대체했다.
+// 백엔드 구현 후 실제 호출로 교체:
+//   await request('/api/payments', {
+//     method: 'POST',
+//     body: JSON.stringify({ reservationId, amount, idempotencyKey }),
+//   })
+//   return request(`/api/reservations/${reservationId}`)
+//   // 409 PAYMENT_TIME_EXPIRED → 만료 안내, 400 PAYMENT_AMOUNT_MISMATCH → 금액 오류
+export async function payDeposit({ reservationId, amount, idempotencyKey }) {
   await delay(700) // PG 승인 지연 흉내
-  const reservation = reservations.get(reservationId)
-  if (!reservation) throw new ApiError(404, '존재하지 않는 예약입니다.')
-  if (reservation.status === 'CONFIRMED') return { ...reservation }
+  void idempotencyKey // 실제 API 계약(PaymentApproveRequestDto)에 필요한 필드 — 목에서는 미사용
+  const reservation = mockReservations.get(reservationId)
+  if (!reservation) throw new ApiError(404, 'RESERVATION_NOT_FOUND', '존재하지 않는 예약입니다.')
+  if (reservation.status === 'CONFIRMED') return { ...reservation } // 멱등 응답
   if (Date.now() > reservation.expiresAt) {
     reservation.status = 'EXPIRED'
-    const slot = findSlot(reservation.slotId)
-    if (slot.status === 'HELD') slot.status = 'AVAILABLE'
-    throw new ApiError(409, '선점 시간이 만료되었습니다. 슬롯을 다시 선택해주세요.')
+    mockClosedSlotIds.delete(reservation.slotId)
+    throw new ApiError(409, 'PAYMENT_TIME_EXPIRED', '선점 시간이 만료되었습니다. 슬롯을 다시 선택해주세요.')
+  }
+  if (amount !== reservation.depositAmount) {
+    throw new ApiError(400, 'PAYMENT_AMOUNT_MISMATCH', '결제 금액이 일치하지 않습니다.')
   }
   reservation.status = 'CONFIRMED'
-  findSlot(reservation.slotId).status = 'RESERVED'
   return { ...reservation }
 }
 
-// ── 웨이팅 (FR-14~16) — 2단계 웨이팅 화면에서 사용 ───────────────────
-let currentWaiting = null
+// ── 웨이팅 (② 화면에서 사용) ─────────────────────────────────────────
+let mockWaiting = null
 
-// _registeredAt 같은 목 내부 필드를 뺀 응답 형태
-function publicWaiting(w) {
-  return {
-    waitingId: w.waitingId,
-    number: w.number,
-    partySize: w.partySize,
-    aheadCount: w.aheadCount,
-    status: w.status,
+// 웨이팅 등록 — 실제 API를 먼저 시도하고, 핵심영역 6 미구현(500)이면 목으로 폴백한다.
+// 백엔드 구현 후: catch의 폴백 분기를 제거하면 된다.
+export async function registerWaiting(restaurantId, restaurantName) {
+  try {
+    return await request('/api/waitings', {
+      method: 'POST',
+      body: JSON.stringify({ restaurantId }),
+    })
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 500) {
+      // [목 폴백] WaitingResponseDto 형태를 그대로 흉내 낸다
+      mockWaiting = {
+        id: -1,
+        restaurantId,
+        restaurantName,
+        waitingNo: 12,
+        status: 'WAITING', // WAITING | CALLED | SEATED | EXPIRED | CANCELED
+        calledAt: null,
+        aheadCount: 7,
+        _registeredAt: Date.now(),
+      }
+      return publicWaiting()
+    }
+    throw e
   }
 }
 
-// 웨이팅 등록 (FR-14)
-// 백엔드 완성 후 실제 fetch로 교체:
-//   POST /api/waitings  body: { restaurantId, partySize }
-export async function registerWaiting(restaurantId, partySize) {
-  await delay(300)
-  currentWaiting = {
-    waitingId: 1,
-    number: 12, // 내 대기 번호
-    partySize,
-    aheadCount: 7, // 내 앞 팀 수
-    status: 'WAITING', // WAITING | CALLED | EXPIRED
-    _registeredAt: Date.now(),
-    _calledAt: null,
-  }
-  return publicWaiting(currentWaiting)
-}
-
-// 내 순번 조회 — 폴링용 (FR-15), 호출·만료 상태 반영 (FR-16)
-// 백엔드 완성 후 실제 fetch로 교체:
-//   GET /api/waitings/{waitingId}
+// 내 순번 조회(3초 폴링) — 실제 API.
+// 단, 등록이 목으로 폴백된 건(id 음수)은 백엔드에 없으므로 목으로 폴링한다.
+// 백엔드 등록 구현 후: 목 분기(id < 0)를 제거하면 된다.
 export async function getWaitingStatus(waitingId) {
-  await delay(150)
-  if (!currentWaiting || currentWaiting.waitingId !== waitingId) {
-    throw new ApiError(404, '존재하지 않는 웨이팅입니다.')
+  if (waitingId > 0) {
+    return request(`/api/waitings/${waitingId}`)
   }
-  const w = currentWaiting
+  await delay(150)
+  if (!mockWaiting || mockWaiting.id !== waitingId) {
+    throw new ApiError(404, 'WAITING_NOT_FOUND', '존재하지 않는 웨이팅입니다.')
+  }
+  const w = mockWaiting
   if (w.status === 'WAITING') {
-    // 시연용: 8초마다 앞 팀이 한 팀씩 빠지고, 0팀이 되면 사장이 호출한다
+    // 시연용: 8초마다 앞 팀이 한 팀씩 빠지고, 0팀이 되면 사장이 호출한 것으로 간주
     const elapsed = Date.now() - w._registeredAt
     w.aheadCount = Math.max(0, 7 - Math.floor(elapsed / 8000))
     if (w.aheadCount === 0) {
       w.status = 'CALLED'
-      w._calledAt = Date.now()
+      w.calledAt = new Date().toISOString()
     }
   }
-  if (w.status === 'CALLED' && Date.now() - w._calledAt > CALL_DURATION_MS) {
+  if (w.status === 'CALLED' && Date.now() - new Date(w.calledAt).getTime() > 10 * 60 * 1000) {
     w.status = 'EXPIRED' // 호출 후 10분 내 도착 확인 없음 → 순번 넘어감
   }
-  return publicWaiting(w)
+  return publicWaiting()
+}
+
+function publicWaiting() {
+  const { id, restaurantId, restaurantName, waitingNo, status, calledAt, aheadCount } = mockWaiting
+  return { id, restaurantId, restaurantName, waitingNo, status, calledAt, aheadCount }
 }

@@ -1,20 +1,21 @@
 import { useEffect, useState } from 'react'
-import { ApiError, RESTAURANT, getSlots, holdSlot } from '../api'
+import { ApiError, getSlots, holdSlot } from '../api'
 import SlotGrid from '../components/SlotGrid'
 import PaymentPanel from '../components/PaymentPanel'
 import ResultBanner from '../components/ResultBanner'
 
+// 시드 슬롯이 다음 달에 생성되므로 기본 날짜는 다음 달 15일
 function defaultDate() {
   const d = new Date()
-  d.setDate(d.getDate() + 1)
+  d.setMonth(d.getMonth() + 1, 15)
   const pad = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-export default function ReservationPage() {
+export default function ReservationPage({ restaurant, policy }) {
   const [date, setDate] = useState(defaultDate)
   const [partySize, setPartySize] = useState(2)
-  const [slotsData, setSlotsData] = useState(null) // { date, slots } — 마지막으로 조회한 결과
+  const [slotsData, setSlotsData] = useState(null) // { date, slots } — 마지막 조회 결과
   const [reloadKey, setReloadKey] = useState(0) // 선점 실패·결제 후 재조회 트리거
   const [holding, setHolding] = useState(false)
   const [reservation, setReservation] = useState(null) // PENDING_PAYMENT 상태의 선점 건
@@ -24,23 +25,24 @@ export default function ReservationPage() {
   // 현재 선택한 날짜의 결과가 아직 없으면 로딩 중으로 본다
   const loading = !slotsData || slotsData.date !== date
   const slots = loading ? [] : slotsData.slots
+  const depositAmount = policy.depositPerPerson * partySize
 
   const refreshSlots = () => setReloadKey((k) => k + 1)
 
   useEffect(() => {
     let stale = false
-    getSlots(RESTAURANT.id, date).then(
+    getSlots(restaurant.id, date).then(
       (fresh) => {
         if (!stale) setSlotsData({ date, slots: fresh })
       },
-      () => {
-        if (!stale) setBanner({ type: 'error', message: '슬롯 조회에 실패했습니다.' })
+      (e) => {
+        if (!stale) setBanner({ type: 'error', message: `슬롯 조회에 실패했습니다. (${e.message})` })
       },
     )
     return () => {
       stale = true
     }
-  }, [date, reloadKey])
+  }, [restaurant.id, date, reloadKey])
 
   const handleSelect = async (slot) => {
     if (holding || loading) return
@@ -48,7 +50,7 @@ export default function ReservationPage() {
     setConfirmation(null)
     setHolding(true)
     try {
-      const held = await holdSlot(slot.slotId, partySize)
+      const held = await holdSlot(slot, partySize, depositAmount)
       setReservation(held)
       setBanner({ type: 'info', message: '슬롯을 선점했습니다. 10분 안에 예약금을 결제해주세요.' })
     } catch (e) {
@@ -115,8 +117,8 @@ export default function ReservationPage() {
           </select>
         </label>
         <span className="deposit-info">
-          예약금 {(RESTAURANT.depositPerPerson * partySize).toLocaleString()}원 (1인{' '}
-          {RESTAURANT.depositPerPerson.toLocaleString()}원)
+          예약금 {depositAmount.toLocaleString()}원 (1인{' '}
+          {policy.depositPerPerson.toLocaleString()}원)
         </span>
       </div>
 
