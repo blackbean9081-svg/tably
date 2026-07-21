@@ -2,20 +2,26 @@ package com.app.tably.reservation.service;
 
 import com.app.tably.common.exception.BusinessException;
 import com.app.tably.common.exception.ErrorCode;
+import com.app.tably.member.entity.Member;
+import com.app.tably.member.repository.MemberRepository;
 import com.app.tably.reservation.dto.ReservationHoldRequestDto;
 import com.app.tably.reservation.dto.ReservationResponseDto;
 import com.app.tably.reservation.entity.Reservation;
 import com.app.tably.reservation.entity.ReservationStatus;
 import com.app.tably.reservation.repository.ReservationRepository;
+import com.app.tably.slot.entity.Slot;
+import com.app.tably.slot.entity.SlotStatus;
 import com.app.tably.slot.repository.SlotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @Transactional(readOnly = true)
@@ -28,6 +34,7 @@ public class ReservationService {
 
     private final ReservationRepository reservationRepository;
     private final SlotRepository slotRepository;
+    private final MemberRepository memberRepository;
 
     /*
      * TODO [핵심영역 1 — 슬롯 선점 (락)] 개발자 본인이 구현할 것. Claude Code 구현 금지.
@@ -49,7 +56,40 @@ public class ReservationService {
      */
     @Transactional
     public Long hold(Long memberId, ReservationHoldRequestDto request) {
-        throw new UnsupportedOperationException("핵심영역 1 — 슬롯 선점 로직 미구현");
+
+        Slot slot;
+        try {
+            slot = slotRepository.findWithLockById(request.slotId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
+
+            if (slot.getStatus() == SlotStatus.CLOSED) {
+                throw new BusinessException(ErrorCode.SLOT_CLOSED);
+            }
+        } catch (PessimisticLockingFailureException e) {
+           throw new BusinessException(ErrorCode.SLOT_ALREADY_TAKEN);
+        }
+
+        boolean taken = reservationRepository.existsBySlotIdAndStatusIn(slot.getId(),
+                List.of(ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED));
+
+        if (taken) {
+            throw new BusinessException(ErrorCode.SLOT_ALREADY_TAKEN);
+        }
+
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+
+        Reservation reservation = Reservation.builder()
+                .slot(slot)
+                .member(member)
+                .partySize(request.partySize())
+                .status(ReservationStatus.PENDING_PAYMENT)
+                .heldAt(LocalDateTime.now())
+                .build();
+
+        Reservation saved = reservationRepository.save(reservation);
+
+        return saved.getId();
     }
 
     /*

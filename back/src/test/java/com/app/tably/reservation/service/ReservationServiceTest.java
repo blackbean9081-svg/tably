@@ -4,6 +4,7 @@ import com.app.tably.common.exception.BusinessException;
 import com.app.tably.common.exception.ErrorCode;
 import com.app.tably.member.entity.Member;
 import com.app.tably.member.entity.Role;
+import com.app.tably.member.repository.MemberRepository;
 import com.app.tably.reservation.dto.ReservationHoldRequestDto;
 import com.app.tably.reservation.entity.Reservation;
 import com.app.tably.reservation.entity.ReservationStatus;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -30,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 
 @ExtendWith(MockitoExtension.class)
 class ReservationServiceTest {
@@ -40,6 +43,9 @@ class ReservationServiceTest {
     @Mock
     private SlotRepository slotRepository;
 
+    @Mock
+    private MemberRepository memberRepository;
+
     @InjectMocks
     private ReservationService reservationService;
 
@@ -47,13 +53,16 @@ class ReservationServiceTest {
         return Member.builder().id(id).email("guest@tably.com").password("pw").name("김지현").role(Role.GUEST).build();
     }
 
-    private Reservation reservation(Long id, Long memberId, ReservationStatus status) {
+    private Slot openSlot() {
         Member owner = Member.builder().id(99L).email("owner@tably.com").password("pw").name("박성호").role(Role.OWNER).build();
         Restaurant restaurant = Restaurant.builder().id(10L).owner(owner).name("스시 준").build();
-        Slot slot = Slot.builder().id(20L).restaurant(restaurant)
+        return Slot.builder().id(20L).restaurant(restaurant)
                 .slotDate(LocalDate.of(2026, 8, 15)).slotTime(LocalTime.of(20, 30))
                 .tableNo(1).status(SlotStatus.OPEN).build();
-        return Reservation.builder().id(id).slot(slot).member(guest(memberId))
+    }
+
+    private Reservation reservation(Long id, Long memberId, ReservationStatus status) {
+        return Reservation.builder().id(id).slot(openSlot()).member(guest(memberId))
                 .partySize(2).status(status).heldAt(LocalDateTime.now()).build();
     }
 
@@ -82,21 +91,46 @@ class ReservationServiceTest {
     }
 
     @Test
-    @DisplayName("선점(hold)은 핵심영역 1 구현 전까지 UnsupportedOperationException")
-    void hold_notImplementedYet() {
+    @DisplayName("없는 슬롯 선점은 SLOT_NOT_FOUND")
+    void hold_slotNotFound() {
+        given(slotRepository.findWithLockById(20L)).willReturn(Optional.empty());
+
         assertThatThrownBy(() -> reservationService.hold(1L, new ReservationHoldRequestDto(20L, 2)))
-                .isInstanceOf(UnsupportedOperationException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.SLOT_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("선점 성공 시 PENDING_PAYMENT 예약이 저장되고 id가 반환된다")
+    void hold_success() {
+        given(slotRepository.findWithLockById(20L)).willReturn(Optional.of(openSlot()));
+        given(reservationRepository.existsBySlotIdAndStatusIn(any(), any())).willReturn(false);
+        given(memberRepository.findById(1L)).willReturn(Optional.of(guest(1L)));
+        given(reservationRepository.save(any())).willReturn(reservation(100L, 1L, ReservationStatus.PENDING_PAYMENT));
+
+        Long id = reservationService.hold(1L, new ReservationHoldRequestDto(20L, 2));
+
+        assertThat(id).isEqualTo(100L);
+        ArgumentCaptor<Reservation> captor = ArgumentCaptor.forClass(Reservation.class);
+        then(reservationRepository).should().save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(ReservationStatus.PENDING_PAYMENT);
+        assertThat(captor.getValue().getHeldAt()).isNotNull();
     }
 
     // ── 핵심영역 구현 후 활성화할 명세 테스트 ──────────────────────────────
 
     @Test
-    @Disabled("핵심영역 1(슬롯 선점) 구현 후 활성화")
-    @DisplayName("[명세] 활성 예약이 있는 슬롯 선점은 SLOT_ALREADY_TAKEN")
-    void hold_alreadyTaken_spec() {
-        // given: slot 20L에 PENDING_PAYMENT 예약 존재
-        // when: hold(1L, slotId=20L)
-        // then: BusinessException(SLOT_ALREADY_TAKEN)
+    @DisplayName("활성 예약이 있는 슬롯 선점은 SLOT_ALREADY_TAKEN")
+    void hold_alreadyTaken() {
+        given(slotRepository.findWithLockById(20L)).willReturn(Optional.of(openSlot()));
+        given(reservationRepository.existsBySlotIdAndStatusIn(20L,
+                List.of(ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED))).willReturn(true);
+
+        assertThatThrownBy(() -> reservationService.hold(1L, new ReservationHoldRequestDto(20L, 2)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.SLOT_ALREADY_TAKEN);
     }
 
     @Test

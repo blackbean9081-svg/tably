@@ -2,7 +2,9 @@ package com.app.tably.reservation.repository;
 
 import com.app.tably.reservation.entity.Reservation;
 import com.app.tably.reservation.entity.ReservationStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -20,4 +22,9 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 
     // 선점 10분 만료 배치의 조회 대상
     List<Reservation> findAllByStatusAndHeldAtBefore(ReservationStatus status, LocalDateTime threshold);
+
+    // 동시성 테스트의 "활성 예약 정확히 1건" 검증용
+    long countBySlotIdAndStatusIn(Long slotId, Collection<ReservationStatus> statuses);
+
+    List<Reservation> findAllBySlotId(Long slotId);
 }
