@@ -39,7 +39,13 @@ public enum ErrorCode {
     // payment
     PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 내역을 찾을 수 없습니다."),
     PAYMENT_AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "결제 금액이 예약 정보와 일치하지 않습니다."),
-    PAYMENT_TIME_EXPIRED(HttpStatus.CONFLICT, "결제 시한(10분)이 지났습니다.");
+    PAYMENT_TIME_EXPIRED(HttpStatus.CONFLICT, "결제 시한(10분)이 지났습니다."),
+
+    // waiting
+    WAITING_NOT_FOUND(HttpStatus.NOT_FOUND, "웨이팅 내역을 찾을 수 없습니다."),
+    NOT_WAITING_OWNER(HttpStatus.FORBIDDEN, "본인의 웨이팅만 조회할 수 있습니다."),
+    ALREADY_WAITING(HttpStatus.CONFLICT, "이미 대기 중인 웨이팅이 있습니다."),
+    NO_WAITING_TO_CALL(HttpStatus.CONFLICT, "호출할 대기 팀이 없습니다.");
 
     private final HttpStatus status;
     private final String message;
