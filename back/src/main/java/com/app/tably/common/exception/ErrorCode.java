@@ -18,7 +18,12 @@ public enum ErrorCode {
     // member
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 가입된 이메일입니다."),
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
-    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다.");
+    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."),
+
+    // restaurant
+    RESTAURANT_NOT_FOUND(HttpStatus.NOT_FOUND, "식당을 찾을 수 없습니다."),
+    POLICY_NOT_FOUND(HttpStatus.NOT_FOUND, "예약 정책이 설정되지 않은 식당입니다."),
+    NOT_RESTAURANT_OWNER(HttpStatus.FORBIDDEN, "해당 식당의 사장만 가능한 작업입니다.");
 
     private final HttpStatus status;
     private final String message;
