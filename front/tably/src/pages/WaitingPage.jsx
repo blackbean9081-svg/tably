@@ -50,15 +50,16 @@ function WaitingView({ restaurant }) {
 
   return (
     <section className="page">
+      <h2 className="section-title">{restaurant.name} 웨이팅</h2>
       {error && <div className="banner error">{error}</div>}
       {waiting ? (
-        <WaitingStatus waiting={waiting} onUpdate={setWaiting} />
+        <WaitingStatus waiting={waiting} onUpdate={setWaiting} onRestart={() => setWaiting(null)} />
       ) : (
         <div className="panel">
           <h2>원격 줄서기</h2>
           <p className="waiting-desc">
-            {restaurant.name}의 당일 웨이팅에 등록합니다. 등록 후 내 순번이 3초마다 갱신되고,
-            차례가 되면 호출 안내가 표시됩니다.
+            지금 매장 앞에 줄을 서지 않아도 됩니다. 등록하면 내 순번이 3초마다 갱신되고, 차례가
+            되면 호출 안내가 표시됩니다. 호출 후 10분 안에 도착해주세요.
           </p>
           <button className="primary" onClick={handleRegister} disabled={registering}>
             {registering ? '등록 중…' : '웨이팅 등록'}

@@ -864,10 +864,33 @@ button.ghost:disabled {
 }
 
 .waiting-card .ahead strong {
-  font-size: 44px;
+  display: inline-block;
+  font-size: 56px;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
-  margin: 0 6px;
+  margin: 0 8px;
+  line-height: 1.1;
+}
+
+.waiting-card .ahead strong.pop {
+  animation: pop 0.35s ease;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.25);
+    color: var(--success);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.waiting-card .primary {
+  margin-top: 8px;
 }
 
 .live {
