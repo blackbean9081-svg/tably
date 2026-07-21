@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { payDeposit } from '../api'
 
+const HOLD_TOTAL_MS = 10 * 60 * 1000 // 선점 유지 시간 — 진행바 비율 계산용
 const remainingOf = (expiresAt) => Math.max(0, expiresAt - Date.now())
 const hhmm = (t) => t.slice(0, 5)
 
@@ -62,11 +63,14 @@ export default function PaymentPanel({ reservation, onPaid, onError, onExpire })
         </div>
       </dl>
       <p className="countdown">
-        남은 결제 시간{' '}
+        남은 결제 시간
         <strong>
           {minutes}:{seconds}
         </strong>
       </p>
+      <div className="countdown-bar">
+        <div className="fill" style={{ width: `${(remaining / HOLD_TOTAL_MS) * 100}%` }} />
+      </div>
       <button className="primary" onClick={handlePay} disabled={paying || remaining <= 0}>
         {paying ? '결제 중…' : `예약금 ${reservation.depositAmount.toLocaleString()}원 결제`}
       </button>

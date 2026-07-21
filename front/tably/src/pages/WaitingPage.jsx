@@ -1,8 +1,36 @@
-import { useState } from 'react'
-import { ApiError, registerWaiting } from '../api'
+import { useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { ApiError, getRestaurant, registerWaiting } from '../api'
 import WaitingStatus from '../components/WaitingStatus'
 
-export default function WaitingPage({ restaurant }) {
+// 라우트 진입점: /restaurants/:id/waiting
+export default function WaitingPage() {
+  const { id } = useParams()
+  const restaurantId = Number(id)
+  const [restaurant, setRestaurant] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+
+  useEffect(() => {
+    let stale = false
+    getRestaurant(restaurantId).then(
+      (r) => {
+        if (!stale) setRestaurant(r)
+      },
+      (e) => {
+        if (!stale) setLoadError(e.message)
+      },
+    )
+    return () => {
+      stale = true
+    }
+  }, [restaurantId])
+
+  if (loadError) return <div className="banner error">{loadError}</div>
+  if (!restaurant) return <p className="hint">불러오는 중…</p>
+  return <WaitingView restaurant={restaurant} />
+}
+
+function WaitingView({ restaurant }) {
   const [waiting, setWaiting] = useState(null) // WaitingResponseDto
   const [registering, setRegistering] = useState(false)
   const [error, setError] = useState(null)

@@ -25,21 +25,26 @@ export default function WaitingStatus({ waiting, onUpdate }) {
 
   return (
     <div className="panel waiting-card">
-      <h2>
-        {waiting.restaurantName} 대기 {waiting.waitingNo}번
-      </h2>
+      <h2>{waiting.restaurantName} 원격 줄서기</h2>
+      <div className="waiting-no">
+        <span className="label">대기번호</span>
+        <span className="no">{waiting.waitingNo}</span>
+      </div>
 
       {status === 'WAITING' && (
         <>
           <p className="ahead">
             내 앞에 <strong>{waiting.aheadCount ?? '-'}</strong>팀
           </p>
-          <p className="hint">3초마다 자동으로 갱신됩니다.</p>
+          <p className="live">
+            <span className="pulse" />
+            3초마다 자동 갱신 중
+          </p>
         </>
       )}
 
       {status === 'CALLED' && (
-        <div className="banner success">
+        <div className="banner success called">
           <h2>지금 입장해주세요!</h2>
           <p>
             {hhmmss(waiting.calledAt)}에 호출되었습니다. 10분 안에 도착 확인이 없으면 순번이

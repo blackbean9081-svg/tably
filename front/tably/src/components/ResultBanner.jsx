@@ -4,7 +4,9 @@ export default function ResultBanner({ banner, confirmation, onReset }) {
   if (confirmation) {
     return (
       <div className="banner success">
-        <h2>예약 확정</h2>
+        <h2>
+          <span className="check-circle">✓</span>예약 확정
+        </h2>
         <p>
           {confirmation.slotDate} {hhmm(confirmation.slotTime)} · 테이블 {confirmation.tableNo}번 ·{' '}
           {confirmation.partySize}명 · 예약금 {confirmation.depositAmount.toLocaleString()}원 결제

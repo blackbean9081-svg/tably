@@ -10,6 +10,16 @@ export default function SlotGrid({ slots, loading, onSelect }) {
   const times = [...new Set(slots.map((s) => s.slotTime))]
   return (
     <div className={loading ? 'slot-groups dim' : 'slot-groups'}>
+      <div className="slot-legend">
+        <span>
+          <span className="dot open" />
+          예약 가능
+        </span>
+        <span>
+          <span className="dot closed" />
+          마감
+        </span>
+      </div>
       {times.map((time) => (
         <div key={time} className="slot-group">
           <h2>{hhmm(time)}</h2>

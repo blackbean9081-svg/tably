@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ApiError, getSlots, holdSlot } from '../api'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { ApiError, getPolicy, getRestaurant, getSlots, holdSlot } from '../api'
 import SlotGrid from '../components/SlotGrid'
 import PaymentPanel from '../components/PaymentPanel'
 import ResultBanner from '../components/ResultBanner'
@@ -12,8 +13,36 @@ function defaultDate() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-export default function ReservationPage({ restaurant, policy }) {
-  const [date, setDate] = useState(defaultDate)
+// 라우트 진입점: /restaurants/:id/reserve?date=YYYY-MM-DD
+export default function ReservationPage() {
+  const { id } = useParams()
+  const restaurantId = Number(id)
+  const [ctx, setCtx] = useState(null) // { restaurant, policy }
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let stale = false
+    Promise.all([getRestaurant(restaurantId), getPolicy(restaurantId)]).then(
+      ([restaurant, policy]) => {
+        if (!stale) setCtx({ restaurant, policy })
+      },
+      (e) => {
+        if (!stale) setError(e.message)
+      },
+    )
+    return () => {
+      stale = true
+    }
+  }, [restaurantId])
+
+  if (error) return <div className="banner error">{error}</div>
+  if (!ctx) return <p className="hint">불러오는 중…</p>
+  return <ReservationView restaurant={ctx.restaurant} policy={ctx.policy} />
+}
+
+function ReservationView({ restaurant, policy }) {
+  const [searchParams] = useSearchParams()
+  const [date, setDate] = useState(() => searchParams.get('date') ?? defaultDate())
   const [partySize, setPartySize] = useState(2)
   const [slotsData, setSlotsData] = useState(null) // { date, slots } — 마지막 조회 결과
   const [reloadKey, setReloadKey] = useState(0) // 선점 실패·결제 후 재조회 트리거
@@ -117,7 +146,7 @@ export default function ReservationPage({ restaurant, policy }) {
           </select>
         </label>
         <span className="deposit-info">
-          예약금 {depositAmount.toLocaleString()}원 (1인{' '}
+          예약금 <strong>{depositAmount.toLocaleString()}원</strong> (1인{' '}
           {policy.depositPerPerson.toLocaleString()}원)
         </span>
       </div>

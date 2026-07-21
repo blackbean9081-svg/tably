@@ -77,16 +77,24 @@ async function request(path, options = {}, retried = false) {
 
 // ── 실제 API ─────────────────────────────────────────────────────────
 
-// 앱 시작 시: 자동 로그인 → 「스시 준」 식당·예약 정책 조회
-export async function bootstrap() {
-  await login()
-  const restaurants = await request('/api/restaurants')
-  const restaurant = restaurants.find((r) => r.name === '스시 준') ?? restaurants[0]
-  if (!restaurant) {
-    throw new ApiError(404, 'RESTAURANT_NOT_FOUND', '시드 식당이 없습니다. 백엔드 시드 데이터를 확인해주세요.')
-  }
-  const policy = await request(`/api/restaurants/${restaurant.id}/policy`)
-  return { restaurant, policy }
+// 앱 시작 시 자동 로그인 (시드 계정 — 로그인 화면 없음)
+export async function ensureLogin() {
+  if (!accessToken) await login()
+}
+
+// 식당 목록 (홈 화면)
+export function getRestaurants() {
+  return request('/api/restaurants')
+}
+
+// 식당 단건
+export function getRestaurant(restaurantId) {
+  return request(`/api/restaurants/${restaurantId}`)
+}
+
+// 예약 정책 (예약금 단가·환불 규정·타임)
+export function getPolicy(restaurantId) {
+  return request(`/api/restaurants/${restaurantId}/policy`)
 }
 
 // 슬롯 조회 — 실제 API.
