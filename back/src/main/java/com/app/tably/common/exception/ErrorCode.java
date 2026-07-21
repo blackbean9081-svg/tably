@@ -27,7 +27,14 @@ public enum ErrorCode {
 
     // slot
     SLOT_NOT_FOUND(HttpStatus.NOT_FOUND, "슬롯을 찾을 수 없습니다."),
-    SLOT_ALREADY_GENERATED(HttpStatus.CONFLICT, "해당 월의 슬롯이 이미 생성되어 있습니다.");
+    SLOT_ALREADY_GENERATED(HttpStatus.CONFLICT, "해당 월의 슬롯이 이미 생성되어 있습니다."),
+
+    // reservation
+    RESERVATION_NOT_FOUND(HttpStatus.NOT_FOUND, "예약을 찾을 수 없습니다."),
+    NOT_RESERVATION_OWNER(HttpStatus.FORBIDDEN, "본인의 예약만 처리할 수 있습니다."),
+    SLOT_ALREADY_TAKEN(HttpStatus.CONFLICT, "방금 마감되었습니다."),
+    SLOT_CLOSED(HttpStatus.CONFLICT, "예약할 수 없는 슬롯입니다."),
+    INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서 불가능한 처리입니다.");
 
     private final HttpStatus status;
     private final String message;
