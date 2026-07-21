@@ -227,3 +227,23 @@ button.primary:disabled {
   color: var(--muted);
   font-size: 14px;
 }
+
+.waiting-desc {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.waiting-card .ahead {
+  margin: 16px 0 4px;
+  font-size: 18px;
+}
+
+.waiting-card .ahead strong {
+  font-size: 40px;
+  color: var(--accent);
+  margin: 0 4px;
+}
+
+.waiting-card .banner {
+  margin-top: 16px;
+}

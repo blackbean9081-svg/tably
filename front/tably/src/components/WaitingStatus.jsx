@@ -1,0 +1,65 @@
+import { useEffect } from 'react'
+import { getWaitingStatus } from '../api'
+
+const POLL_INTERVAL_MS = 3000
+const DONE_STATUSES = ['SEATED', 'EXPIRED', 'CANCELED']
+
+const hhmmss = (iso) => (iso ? iso.slice(11, 19) : '')
+
+export default function WaitingStatus({ waiting, onUpdate }) {
+  const { id, status } = waiting
+
+  // 내 순번 3초 폴링 — 종료 상태(SEATED/EXPIRED/CANCELED)가 되면 멈춘다
+  useEffect(() => {
+    if (DONE_STATUSES.includes(status)) return
+    const timer = setInterval(() => {
+      getWaitingStatus(id).then(
+        (fresh) => onUpdate(fresh),
+        () => {
+          // 일시적 폴링 실패는 다음 주기에서 회복한다
+        },
+      )
+    }, POLL_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [id, status, onUpdate])
+
+  return (
+    <div className="panel waiting-card">
+      <h2>
+        {waiting.restaurantName} 대기 {waiting.waitingNo}번
+      </h2>
+
+      {status === 'WAITING' && (
+        <>
+          <p className="ahead">
+            내 앞에 <strong>{waiting.aheadCount ?? '-'}</strong>팀
+          </p>
+          <p className="hint">3초마다 자동으로 갱신됩니다.</p>
+        </>
+      )}
+
+      {status === 'CALLED' && (
+        <div className="banner success">
+          <h2>지금 입장해주세요!</h2>
+          <p>
+            {hhmmss(waiting.calledAt)}에 호출되었습니다. 10분 안에 도착 확인이 없으면 순번이
+            넘어갑니다.
+          </p>
+        </div>
+      )}
+
+      {status === 'EXPIRED' && (
+        <div className="banner error">호출 후 10분이 지나 대기가 만료되었습니다.</div>
+      )}
+      {status === 'SEATED' && <div className="banner success">입장 처리되었습니다.</div>}
+      {status === 'CANCELED' && <div className="banner error">대기가 취소되었습니다.</div>}
+
+      {id < 0 && (
+        <p className="hint">
+          ※ 웨이팅 등록이 백엔드 미구현(핵심영역 6)이라 목 응답으로 동작 중입니다. 백엔드 구현
+          시 자동으로 실제 API로 전환됩니다.
+        </p>
+      )}
+    </div>
+  )
+}

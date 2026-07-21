@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { bootstrap } from './api'
 import ReservationPage from './pages/ReservationPage'
+import WaitingPage from './pages/WaitingPage'
 import './App.css'
 
 function App() {
@@ -52,10 +53,17 @@ function App() {
         </div>
       ) : !boot ? (
         <p className="hint">로그인 중…</p>
-      ) : tab === 'reservation' ? (
-        <ReservationPage restaurant={boot.restaurant} policy={boot.policy} />
       ) : (
-        <p className="hint">웨이팅 화면은 2단계에서 구현합니다.</p>
+        // 두 화면을 모두 마운트해두고 표시만 전환한다
+        // (탭을 오가도 결제 카운트다운·웨이팅 폴링 상태가 유지되도록)
+        <>
+          <div style={{ display: tab === 'reservation' ? 'block' : 'none' }}>
+            <ReservationPage restaurant={boot.restaurant} policy={boot.policy} />
+          </div>
+          <div style={{ display: tab === 'waiting' ? 'block' : 'none' }}>
+            <WaitingPage restaurant={boot.restaurant} />
+          </div>
+        </>
       )}
     </div>
   )
