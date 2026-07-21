@@ -20,13 +20,19 @@ export default function SlotGrid({ slots, loading, onSelect }) {
           마감
         </span>
       </div>
-      {times.map((time) => (
-        <div key={time} className="slot-group">
-          <h2>{hhmm(time)}</h2>
-          <div className="slot-grid">
-            {slots
-              .filter((s) => s.slotTime === time)
-              .map((slot) => (
+      {times.map((time) => {
+        const group = slots.filter((s) => s.slotTime === time)
+        const openCount = group.filter((s) => s.status === 'OPEN').length
+        return (
+          <div key={time} className="slot-group">
+            <h2>
+              {hhmm(time)}
+              <span className={openCount > 0 ? 'remaining' : 'remaining zero'}>
+                {openCount > 0 ? `${openCount}자리 남음` : '마감'}
+              </span>
+            </h2>
+            <div className="slot-grid">
+              {group.map((slot) => (
                 <button
                   key={slot.id}
                   className={`slot ${slot.status === 'OPEN' ? 'available' : 'closed'}`}
@@ -36,9 +42,10 @@ export default function SlotGrid({ slots, loading, onSelect }) {
                   <span className="state">{slot.status === 'OPEN' ? '예약 가능' : '마감'}</span>
                 </button>
               ))}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

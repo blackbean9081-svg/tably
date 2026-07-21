@@ -290,6 +290,41 @@
   box-shadow: var(--shadow-hover);
 }
 
+/* ── 상태 배지 (예약가능/마감/선점중/확정/취소) ── */
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid;
+  vertical-align: 2px;
+}
+
+.badge.pending {
+  color: var(--pending);
+  background: var(--pending-bg);
+  border-color: var(--pending-border);
+}
+
+.badge.confirmed {
+  color: var(--success);
+  background: var(--success-bg);
+  border-color: var(--success-border);
+}
+
+.badge.canceled {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error-border);
+}
+
+.badge.done {
+  color: var(--muted);
+  background: #efeae2;
+  border-color: var(--border);
+}
+
 /* ── 조회 조건 ────────────────────────── */
 .controls {
   display: flex;
@@ -325,11 +360,52 @@
   border-color: var(--accent);
 }
 
+.party-control {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.control-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.segments {
+  display: flex;
+  padding: 3px;
+  background: #ece7df;
+  border-radius: 10px;
+  gap: 3px;
+}
+
+.segment {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.segment.active {
+  background: var(--card);
+  color: var(--accent-dark);
+  box-shadow: var(--shadow);
+}
+
+.segment:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .deposit-info {
   font-size: 13px;
   color: var(--muted);
-  padding-bottom: 10px;
-  margin-left: auto;
+  margin: 0 0 16px;
 }
 
 .deposit-info strong {
@@ -447,6 +523,16 @@
   gap: 8px;
   font-size: 16px;
   margin: 22px 0 10px;
+}
+
+.remaining {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.remaining.zero {
+  color: var(--muted);
 }
 
 .slot-group h2::before {
@@ -596,6 +682,139 @@ button.primary:hover:not(:disabled) {
 button.primary:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+/* ── 결제 바텀 시트 ───────────────────── */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(43, 39, 35, 0.45);
+  animation: fade-in 0.2s ease;
+  z-index: 20;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.sheet {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  background: var(--card);
+  border-radius: 18px 18px 0 0;
+  padding: 10px 20px 22px;
+  box-shadow: 0 -8px 32px rgba(43, 39, 35, 0.18);
+  animation: sheet-up 0.25s ease;
+  z-index: 21;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translate(-50%, 40%);
+    opacity: 0.5;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+.sheet-handle {
+  width: 44px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 0 auto 12px;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sheet-head h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+button.ghost {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  font-size: 13px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  text-decoration: underline;
+}
+
+button.ghost:disabled {
+  opacity: 0.5;
+}
+
+/* ── 선점중 하단 바 ───────────────────── */
+.pending-bar {
+  position: fixed;
+  bottom: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 448px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--card);
+  border: 1px solid var(--pending-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-hover);
+  z-index: 15;
+  animation: slide-in 0.25s ease;
+}
+
+.pending-bar .pending-info {
+  flex: 1;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pending-bar .pending-timer {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pending);
+}
+
+/* ── 예약 확정 카드 ───────────────────── */
+.confirm-card h2 .badge {
+  margin-left: 8px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.banner-link {
+  display: inline-block;
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--success);
 }
 
 /* ── 웨이팅 ───────────────────────────── */

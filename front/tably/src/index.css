@@ -14,6 +14,9 @@
   --error: #b0392b;
   --error-bg: #fbefec;
   --error-border: #e3b3aa;
+  --pending: #9a6b10;
+  --pending-bg: #faf1dc;
+  --pending-border: #e3cd9a;
   --info-bg: #eef2f8;
   --info-border: #b9c8de;
   --shadow: 0 1px 2px rgba(43, 39, 35, 0.05), 0 6px 20px rgba(43, 39, 35, 0.06);

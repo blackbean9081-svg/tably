@@ -48,6 +48,7 @@ function ReservationView({ restaurant, policy }) {
   const [reloadKey, setReloadKey] = useState(0) // 선점 실패·결제 후 재조회 트리거
   const [holding, setHolding] = useState(false)
   const [reservation, setReservation] = useState(null) // PENDING_PAYMENT 상태의 선점 건
+  const [sheetOpen, setSheetOpen] = useState(false) // 결제 시트 표시 여부
   const [confirmation, setConfirmation] = useState(null) // CONFIRMED 결과
   const [banner, setBanner] = useState(null) // { type: 'info' | 'error', message }
 
@@ -73,15 +74,34 @@ function ReservationView({ restaurant, policy }) {
     }
   }, [restaurant.id, date, reloadKey])
 
+  // 선점 만료 감시 — 결제 시트가 닫혀 있어도 10분 경과 시 자동 해제 처리
+  useEffect(() => {
+    if (!reservation) return
+    const timer = setInterval(() => {
+      if (Date.now() >= reservation.expiresAt) {
+        setReservation(null)
+        setSheetOpen(false)
+        setBanner({ type: 'error', message: '선점 시간이 만료되었습니다. 슬롯을 다시 선택해주세요.' })
+        setReloadKey((k) => k + 1)
+      }
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [reservation])
+
   const handleSelect = async (slot) => {
     if (holding || loading) return
+    if (reservation) {
+      // 이미 선점한 슬롯이 있으면 결제 시트를 다시 연다
+      setSheetOpen(true)
+      return
+    }
     setBanner(null)
     setConfirmation(null)
     setHolding(true)
     try {
       const held = await holdSlot(slot, partySize, depositAmount)
       setReservation(held)
-      setBanner({ type: 'info', message: '슬롯을 선점했습니다. 10분 안에 예약금을 결제해주세요.' })
+      setSheetOpen(true)
     } catch (e) {
       setBanner({
         type: 'error',
@@ -95,6 +115,7 @@ function ReservationView({ restaurant, policy }) {
 
   const handlePaid = (confirmed) => {
     setReservation(null)
+    setSheetOpen(false)
     setConfirmation(confirmed)
     setBanner(null)
     refreshSlots()
@@ -102,6 +123,7 @@ function ReservationView({ restaurant, policy }) {
 
   const handlePayError = (e) => {
     setReservation(null)
+    setSheetOpen(false)
     setBanner({
       type: 'error',
       message: e instanceof ApiError ? e.message : '결제에 실패했습니다.',
@@ -109,14 +131,9 @@ function ReservationView({ restaurant, policy }) {
     refreshSlots()
   }
 
-  const handleExpire = () => {
-    setReservation(null)
-    setBanner({ type: 'error', message: '선점 시간이 만료되었습니다. 슬롯을 다시 선택해주세요.' })
-    refreshSlots()
-  }
-
   return (
     <section className="page">
+      <h2 className="section-title">{restaurant.name} 예약</h2>
       <div className="controls">
         <label>
           날짜
@@ -131,25 +148,26 @@ function ReservationView({ restaurant, policy }) {
             }}
           />
         </label>
-        <label>
-          인원
-          <select
-            value={partySize}
-            disabled={!!reservation}
-            onChange={(e) => setPartySize(Number(e.target.value))}
-          >
+        <div className="party-control">
+          <span className="control-label">인원</span>
+          <div className="segments">
             {[1, 2, 3, 4].map((n) => (
-              <option key={n} value={n}>
+              <button
+                key={n}
+                className={partySize === n ? 'segment active' : 'segment'}
+                disabled={!!reservation}
+                onClick={() => setPartySize(n)}
+              >
                 {n}명
-              </option>
+              </button>
             ))}
-          </select>
-        </label>
-        <span className="deposit-info">
-          예약금 <strong>{depositAmount.toLocaleString()}원</strong> (1인{' '}
-          {policy.depositPerPerson.toLocaleString()}원)
-        </span>
+          </div>
+        </div>
       </div>
+      <p className="deposit-info">
+        예약금 <strong>{depositAmount.toLocaleString()}원</strong> (1인{' '}
+        {policy.depositPerPerson.toLocaleString()}원 × {partySize}명) · 정상 방문 시 전액 환불
+      </p>
 
       <ResultBanner
         banner={banner}
@@ -157,16 +175,49 @@ function ReservationView({ restaurant, policy }) {
         onReset={() => setConfirmation(null)}
       />
 
-      {reservation ? (
+      <SlotGrid slots={slots} loading={loading || holding} onSelect={handleSelect} />
+
+      {reservation && !sheetOpen && (
+        <PendingBar reservation={reservation} onOpen={() => setSheetOpen(true)} />
+      )}
+      {reservation && sheetOpen && (
         <PaymentPanel
           reservation={reservation}
           onPaid={handlePaid}
           onError={handlePayError}
-          onExpire={handleExpire}
+          onClose={() => setSheetOpen(false)}
         />
-      ) : (
-        <SlotGrid slots={slots} loading={loading || holding} onSelect={handleSelect} />
       )}
     </section>
+  )
+}
+
+// 결제 시트를 닫아둔 동안 하단에 떠 있는 "선점중" 바
+function PendingBar({ reservation, onOpen }) {
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, reservation.expiresAt - Date.now()),
+  )
+
+  useEffect(() => {
+    const timer = setInterval(
+      () => setRemaining(Math.max(0, reservation.expiresAt - Date.now())),
+      1000,
+    )
+    return () => clearInterval(timer)
+  }, [reservation.expiresAt])
+
+  const minutes = String(Math.floor(remaining / 60000)).padStart(2, '0')
+  const seconds = String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0')
+
+  return (
+    <button className="pending-bar" onClick={onOpen}>
+      <span className="badge pending">선점중</span>
+      <span className="pending-info">
+        {reservation.slotTime.slice(0, 5)} · 테이블 {reservation.tableNo} · 결제하기
+      </span>
+      <strong className="pending-timer">
+        {minutes}:{seconds}
+      </strong>
+    </button>
   )
 }
