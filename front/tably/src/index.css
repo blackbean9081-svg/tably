@@ -1,0 +1,46 @@
+:root {
+  /* 웜톤 다이닝 팔레트 */
+  --text: #2b2723;
+  --muted: #8a8378;
+  --bg: #f6f3ee;
+  --card: #fffdf9;
+  --border: #e7e1d8;
+  --accent: #b4552d;
+  --accent-dark: #97431f;
+  --accent-soft: #f7e9e2;
+  --success: #3d7d4c;
+  --success-bg: #eef6ef;
+  --success-border: #bcd9c2;
+  --error: #b0392b;
+  --error-bg: #fbefec;
+  --error-border: #e3b3aa;
+  --pending: #9a6b10;
+  --pending-bg: #faf1dc;
+  --pending-border: #e3cd9a;
+  --info-bg: #eef2f8;
+  --info-border: #b9c8de;
+  --shadow: 0 1px 2px rgba(43, 39, 35, 0.05), 0 6px 20px rgba(43, 39, 35, 0.06);
+  --shadow-hover: 0 2px 4px rgba(43, 39, 35, 0.06), 0 10px 28px rgba(43, 39, 35, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Pretendard', system-ui, 'Segoe UI', 'Malgun Gothic', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--text);
+  background:
+    radial-gradient(1200px 400px at 50% -100px, #fdf0e7 0%, rgba(253, 240, 231, 0) 70%),
+    var(--bg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
