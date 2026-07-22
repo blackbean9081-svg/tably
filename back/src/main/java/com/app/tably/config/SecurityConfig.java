@@ -49,7 +49,10 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .exceptionHandling(handler -> handler
                         .authenticationEntryPoint((request, response, e) ->
-                                writeErrorBody(response, ErrorCode.UNAUTHORIZED))
+                                writeErrorBody(response,
+                                        request.getAttribute(JwtAuthenticationFilter.EXPIRED_TOKEN_ATTR) != null
+                                                ? ErrorCode.TOKEN_EXPIRED
+                                                : ErrorCode.UNAUTHORIZED))
                         .accessDeniedHandler((request, response, e) ->
                                 writeErrorBody(response, ErrorCode.FORBIDDEN)));
 
