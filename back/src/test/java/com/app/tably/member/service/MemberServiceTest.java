@@ -54,7 +54,7 @@ class MemberServiceTest {
     @Test
     @DisplayName("회원가입 성공 시 비밀번호는 인코딩되어 저장된다")
     void signUp_success() {
-        var request = new SignupRequestDto("guest@tably.com", "password123", "김지현", Role.GUEST);
+        var request = new SignupRequestDto("guest@tably.com", "password123", "김지현");
         given(memberRepository.existsByEmail("guest@tably.com")).willReturn(false);
         given(passwordEncoder.encode("password123")).willReturn("encoded-password");
         given(memberRepository.save(any(Member.class))).willReturn(member(1L));
@@ -68,7 +68,7 @@ class MemberServiceTest {
     @Test
     @DisplayName("중복 이메일 가입은 DUPLICATE_EMAIL 예외")
     void signUp_duplicateEmail() {
-        var request = new SignupRequestDto("guest@tably.com", "password123", "김지현", Role.GUEST);
+        var request = new SignupRequestDto("guest@tably.com", "password123", "김지현");
         given(memberRepository.existsByEmail("guest@tably.com")).willReturn(true);
 
         assertThatThrownBy(() -> memberService.signUp(request))
