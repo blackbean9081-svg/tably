@@ -1,6 +1,7 @@
 package com.app.tably.config.jwt;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -23,6 +24,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
 
+    // 401 응답 시 "만료"와 "무효/없음"을 구분하기 위해 entry point로 전달하는 표식
+    public static final String EXPIRED_TOKEN_ATTR = "tably.expiredToken";
+
     private final JwtTokenProvider jwtTokenProvider;
 
     @Override
@@ -43,6 +47,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         List.of(new SimpleGrantedAuthority("ROLE_" + role))
                 );
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+            } catch (ExpiredJwtException e) {
+                // 만료는 프론트의 재로그인 유도 근거가 되므로 무효 토큰과 구분해 표식을 남긴다
+                request.setAttribute(EXPIRED_TOKEN_ATTR, true);
+                SecurityContextHolder.clearContext();
             } catch (JwtException | IllegalArgumentException e) {
                 // 유효하지 않은 토큰은 미인증 상태로 통과 → 뒤의 인가 단계에서 401 처리
                 SecurityContextHolder.clearContext();

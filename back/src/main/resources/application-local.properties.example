@@ -1,0 +1,4 @@
+# 이 파일을 application-local.properties로 복사한 뒤 실제 값을 채울 것
+# jwt.secret은 base64 인코딩된 32바이트 이상 랜덤 키
+spring.datasource.password=your-db-password
+jwt.secret=your-base64-encoded-secret-key-at-least-32-bytes

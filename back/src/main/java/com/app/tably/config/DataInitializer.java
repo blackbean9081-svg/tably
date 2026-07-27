@@ -20,7 +20,7 @@ import java.time.YearMonth;
 
 /**
  * 로컬 시연용 시드 데이터. member 테이블이 비어 있을 때 1회만 실행된다.
- * 계정: guest@tably.com / owner@tably.com (비밀번호 모두 password123!)
+ * 계정: guest@tably.com / owner@tably.com / admin@tably.com (비밀번호 모두 password123!)
  */
 @Component
 @RequiredArgsConstructor
@@ -53,6 +53,12 @@ public class DataInitializer implements CommandLineRunner {
                 .password(passwordEncoder.encode(SEED_PASSWORD))
                 .name("박성호")
                 .role(Role.OWNER)
+                .build());
+        memberRepository.save(Member.builder()
+                .email("admin@tably.com")
+                .password(passwordEncoder.encode(SEED_PASSWORD))
+                .name("운영자")
+                .role(Role.ADMIN)
                 .build());
 
         Restaurant sushiJun = restaurantRepository.save(Restaurant.builder()

@@ -1,5 +1,8 @@
 HELP.md
 .gradle
+
+### 로컬 시크릿 ###
+application-local.properties
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/

@@ -8,8 +8,10 @@ import com.app.tably.member.dto.MemberResponseDto;
 import com.app.tably.member.dto.SignupRequestDto;
 import com.app.tably.member.dto.TokenResponseDto;
 import com.app.tably.member.entity.Member;
+import com.app.tably.member.entity.Role;
 import com.app.tably.member.repository.MemberRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,9 +34,13 @@ public class MemberService {
                 .email(request.email())
                 .password(passwordEncoder.encode(request.password()))
                 .name(request.name())
-                .role(request.role())
+                .role(Role.GUEST)
                 .build();
-        return memberRepository.save(member).getId();
+        try {
+            return memberRepository.save(member).getId();
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
+        }
     }
 
     public TokenResponseDto login(LoginRequestDto request) {

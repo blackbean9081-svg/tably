@@ -1,10 +1,13 @@
 package com.app.tably.restaurant.controller;
 
 import com.app.tably.common.response.ApiResponse;
+import com.app.tably.restaurant.dto.ClosureRequestDto;
+import com.app.tably.restaurant.dto.ClosureResultDto;
 import com.app.tably.restaurant.dto.PolicyRequestDto;
 import com.app.tably.restaurant.dto.PolicyResponseDto;
 import com.app.tably.restaurant.dto.RestaurantCreateRequestDto;
 import com.app.tably.restaurant.dto.RestaurantResponseDto;
+import com.app.tably.restaurant.service.RestaurantClosureService;
 import com.app.tably.restaurant.service.RestaurantService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +24,7 @@ import java.util.List;
 public class RestaurantController {
 
     private final RestaurantService restaurantService;
+    private final RestaurantClosureService restaurantClosureService;
 
     @PostMapping
     @PreAuthorize("hasRole('OWNER')")
@@ -52,5 +56,15 @@ public class RestaurantController {
     @GetMapping("/{restaurantId}/policy")
     public ApiResponse<PolicyResponseDto> findPolicy(@PathVariable Long restaurantId) {
         return ApiResponse.ok(restaurantService.findPolicy(restaurantId));
+    }
+
+    // S8/FR-10: 기간 휴업 — 슬롯 닫기 + 확정 예약 일괄 취소(전액 환불), 건별 성공/실패 보고
+    @PostMapping("/{restaurantId}/closures")
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    public ApiResponse<ClosureResultDto> closeTemporarily(Authentication authentication,
+                                                          @PathVariable Long restaurantId,
+                                                          @Valid @RequestBody ClosureRequestDto request) {
+        return ApiResponse.ok(restaurantClosureService.closeTemporarily(
+                (Long) authentication.getPrincipal(), restaurantId, request));
     }
 }

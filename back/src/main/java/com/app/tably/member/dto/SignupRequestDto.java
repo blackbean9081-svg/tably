@@ -1,9 +1,7 @@
 package com.app.tably.member.dto;
 
-import com.app.tably.member.entity.Role;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 public record SignupRequestDto(
@@ -17,9 +15,7 @@ public record SignupRequestDto(
         String password,
 
         @NotBlank
-        String name,
+        String name
 
-        @NotNull
-        Role role
 ) {
 }
