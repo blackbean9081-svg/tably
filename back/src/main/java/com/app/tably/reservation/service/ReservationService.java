@@ -4,21 +4,32 @@ import com.app.tably.common.exception.BusinessException;
 import com.app.tably.common.exception.ErrorCode;
 import com.app.tably.member.entity.Member;
 import com.app.tably.member.repository.MemberRepository;
+import com.app.tably.notification.entity.NotificationType;
+import com.app.tably.notification.event.NotificationEvent;
+import com.app.tably.payment.service.PaymentService;
+import com.app.tably.payment.service.RefundCalculator;
+import com.app.tably.reservation.dto.AppealRequestDto;
+import com.app.tably.reservation.dto.AppealResponseDto;
 import com.app.tably.reservation.dto.ReservationHoldRequestDto;
 import com.app.tably.reservation.dto.ReservationResponseDto;
+import com.app.tably.reservation.entity.AppealStatus;
+import com.app.tably.reservation.entity.NoShowAppeal;
 import com.app.tably.reservation.entity.Reservation;
 import com.app.tably.reservation.entity.ReservationStatus;
+import com.app.tably.reservation.repository.NoShowAppealRepository;
 import com.app.tably.reservation.repository.ReservationRepository;
 import com.app.tably.slot.entity.Slot;
 import com.app.tably.slot.entity.SlotStatus;
 import com.app.tably.slot.repository.SlotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -33,8 +44,11 @@ public class ReservationService {
     public static final Duration HOLD_TIMEOUT = Duration.ofMinutes(10);
 
     private final ReservationRepository reservationRepository;
+    private final NoShowAppealRepository noShowAppealRepository;
     private final SlotRepository slotRepository;
     private final MemberRepository memberRepository;
+    private final PaymentService paymentService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /*
      * TODO [핵심영역 1 — 슬롯 선점 (락)] 개발자 본인이 구현할 것. Claude Code 구현 금지.
@@ -92,22 +106,16 @@ public class ReservationService {
         return saved.getId();
     }
 
-    /*
-     * TODO [핵심영역 4 — 예약 상태 전이 검증] 개발자 본인이 구현할 것. Claude Code 구현 금지.
-     *
-     * 이 메서드가 만족해야 할 조건 (상태 머신: requirements.md 4장 / erd.md):
-     *  1. 허용 전이만 통과, 그 외에는 BusinessException(INVALID_STATUS_TRANSITION):
-     *     PENDING_PAYMENT → CONFIRMED(결제 완료) | EXPIRED(10분 미결제)
-     *     CONFIRMED      → CANCELED_BY_USER | CANCELED_BY_SHOP | VISITED | NO_SHOW
-     *     NO_SHOW        → VISITED(당일 내 사장 정정) | NO_SHOW_REVOKED(이의신청 인용)
-     *     그 외 상태는 종결 상태 — 어떤 전이도 불가
-     *  2. 경합 상황에서 한쪽만 이겨야 한다:
-     *     예) 만료 배치의 PENDING_PAYMENT→EXPIRED 와 결제 완료의 →CONFIRMED 가 동시에 오면
-     *     둘 중 하나만 반영 (낙관적 락 또는 조건부 UPDATE 고려)
-     *  3. NO_SHOW → VISITED 정정은 "당일 자정까지"라는 시간 조건이 붙는다 (S5)
+    /**
+     * 핵심영역 4 — 상태 머신의 단일 관문. 허용 전이 목록은 ReservationStatus가 갖는다.
+     * 경합(만료 배치 vs 결제 완료, 노쇼 배치 vs 방문 처리)은 검증만으로 못 막으므로
+     * 호출부가 행 락(findWithLockById) 또는 조건부 UPDATE(updateStatusIfCurrent)와 함께 쓴다.
      */
     public void validateTransition(ReservationStatus current, ReservationStatus target) {
-        throw new UnsupportedOperationException("핵심영역 4 — 상태 전이 검증 미구현");
+        if (!current.canTransitionTo(target)) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION,
+                    "%s → %s 전이는 허용되지 않습니다".formatted(current, target));
+        }
     }
 
     public List<ReservationResponseDto> getMyReservations(Long memberId) {
@@ -126,39 +134,168 @@ public class ReservationService {
     }
 
     /**
-     * 손님 취소. 조회·권한 검증까지만 구현 —
-     * 상태 전이는 핵심영역 4, 환불 계산은 핵심영역 3(PaymentService 쪽) 구현 후 연결된다.
+     * S4: 손님 취소. 행 락으로 결제 승인·노쇼 배치·동시 취소와 직렬화한 뒤
+     * 전이 검증 → 상태 변경 → 시점별 환불 기록(FR-08)까지 한 트랜잭션으로 처리한다.
      */
     @Transactional
     public void cancelByUser(Long memberId, Long reservationId) {
-        Reservation reservation = reservationRepository.findById(reservationId)
+        Reservation reservation = reservationRepository.findWithLockById(reservationId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
         if (!reservation.isOwnedBy(memberId)) {
             throw new BusinessException(ErrorCode.NOT_RESERVATION_OWNER);
         }
         validateTransition(reservation.getStatus(), ReservationStatus.CANCELED_BY_USER);
         reservation.changeStatus(ReservationStatus.CANCELED_BY_USER);
-        // TODO 환불 계산(핵심영역 3) 구현 후: 시점별 환불액 산정 → PaymentService 환불 요청 연결 (S4)
+        int refunded = paymentService.refundOnCancel(reservation, RefundCalculator.CancelCause.USER);
+        eventPublisher.publishEvent(NotificationEvent.of(memberId, NotificationType.RESERVATION_CANCELED,
+                "%s 예약이 취소되었습니다. 환불 예정액 %,d원.".formatted(describe(reservation), refunded)));
     }
 
     /**
-     * FR-05: 선점 10분 만료 처리. 대상 조회는 구현 —
-     * 실제 EXPIRED 전이는 상태 전이 검증(핵심영역 4) 구현 후 활성화한다.
+     * FR-05: 선점 10분 만료 처리. 조건부 일괄 UPDATE 한 문장 —
+     * 결제 완료(행 락 보유)와 경합하면 락 해제까지 대기 후 조건 불일치로 비켜 가므로
+     * "둘 중 한쪽만 이긴다"가 DB 수준에서 보장된다.
      */
     @Transactional
     public int expireOverdueHolds() {
+        validateTransition(ReservationStatus.PENDING_PAYMENT, ReservationStatus.EXPIRED);
         LocalDateTime threshold = LocalDateTime.now().minus(HOLD_TIMEOUT);
-        List<Reservation> overdue = reservationRepository
-                .findAllByStatusAndHeldAtBefore(ReservationStatus.PENDING_PAYMENT, threshold);
-        if (overdue.isEmpty()) {
-            return 0;
+        int expired = reservationRepository.updateStatusAllHeldBefore(
+                ReservationStatus.PENDING_PAYMENT, threshold, ReservationStatus.EXPIRED);
+        if (expired > 0) {
+            log.info("선점 만료 {}건 처리", expired);
         }
-        // TODO 핵심영역 4 구현 후 아래 주석 해제 — 결제 완료와의 경합에서 한쪽만 이겨야 함
-        // overdue.forEach(r -> {
-        //     validateTransition(r.getStatus(), ReservationStatus.EXPIRED);
-        //     r.changeStatus(ReservationStatus.EXPIRED);
-        // });
-        log.warn("선점 만료 대상 {}건 발견 — 상태 전이 검증(핵심영역 4) 구현 전이라 전이 보류", overdue.size());
-        return overdue.size();
+        return expired;
+    }
+
+    /**
+     * S8/FR-10: 식당 귀책 취소 — 휴업 일괄 취소가 건별 트랜잭션으로 호출한다.
+     * 귀책이 식당이므로 환불 정책을 무시하고 전액 환불된다.
+     */
+    @Transactional
+    public void cancelByShop(Long reservationId) {
+        Reservation reservation = reservationRepository.findWithLockById(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
+        validateTransition(reservation.getStatus(), ReservationStatus.CANCELED_BY_SHOP);
+        reservation.changeStatus(ReservationStatus.CANCELED_BY_SHOP);
+        paymentService.refundOnCancel(reservation, RefundCalculator.CancelCause.SHOP);
+        eventPublisher.publishEvent(NotificationEvent.of(reservation.getMember().getId(),
+                NotificationType.RESERVATION_CANCELED,
+                "식당 사정으로 %s 예약이 취소되었습니다. 예약금 전액이 환불됩니다.".formatted(describe(reservation))));
+    }
+
+    /**
+     * FR-11: 사장의 방문 완료 처리 + 노쇼 당일 정정 (S5).
+     * CONFIRMED→VISITED(정상 방문), NO_SHOW→VISITED(정정 — 당일 자정까지만).
+     * 방문 확인 = 예약금 전액 환불. 행 락으로 노쇼 배치와 직렬화한다.
+     */
+    @Transactional
+    public void markVisited(Long ownerId, Long reservationId) {
+        Reservation reservation = reservationRepository.findWithLockById(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
+        if (!reservation.getSlot().getRestaurant().isOwnedBy(ownerId)) {
+            throw new BusinessException(ErrorCode.NOT_RESTAURANT_OWNER);
+        }
+        ReservationStatus current = reservation.getStatus();
+        validateTransition(current, ReservationStatus.VISITED);
+        if (current == ReservationStatus.NO_SHOW
+                && LocalDate.now().isAfter(reservation.getSlot().getSlotDate())) {
+            // 자정 이후의 번복은 이의신청 → 운영자 심사 경로로만 (S5)
+            throw new BusinessException(ErrorCode.NO_SHOW_CORRECTION_EXPIRED);
+        }
+        reservation.changeStatus(ReservationStatus.VISITED);
+        paymentService.refundDeposit(reservation);
+    }
+
+    /**
+     * FR-12: 단건 노쇼 전환 — 노쇼 배치가 건별 트랜잭션으로 호출한다.
+     * 배치가 읽은 뒤 사장이 방문 처리한 예약을 NO_SHOW로 덮어쓰는 사고(S5)를
+     * 조건부 UPDATE로 차단 — 0건이면 경합에서 진 것이므로 false.
+     */
+    @Transactional
+    public boolean markNoShow(Long reservationId) {
+        validateTransition(ReservationStatus.CONFIRMED, ReservationStatus.NO_SHOW);
+        boolean marked = reservationRepository.updateStatusIfCurrent(
+                reservationId, ReservationStatus.CONFIRMED, ReservationStatus.NO_SHOW) == 1;
+        if (marked) {
+            reservationRepository.findById(reservationId).ifPresent(reservation ->
+                    eventPublisher.publishEvent(NotificationEvent.of(reservation.getMember().getId(),
+                            NotificationType.NO_SHOW_MARKED,
+                            "%s 예약이 미방문으로 노쇼 처리되었습니다. 이의가 있으면 이의신청해주세요.".formatted(describe(reservation)))));
+        }
+        return marked;
+    }
+
+    // ── FR-13: 노쇼 이의신청 (S5) ────────────────────────────────────────
+
+    @Transactional
+    public AppealResponseDto fileNoShowAppeal(Long memberId, Long reservationId, AppealRequestDto request) {
+        Reservation reservation = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
+        if (!reservation.isOwnedBy(memberId)) {
+            throw new BusinessException(ErrorCode.NOT_RESERVATION_OWNER);
+        }
+        if (reservation.getStatus() != ReservationStatus.NO_SHOW) {
+            throw new BusinessException(ErrorCode.APPEAL_NOT_ALLOWED);
+        }
+        if (noShowAppealRepository.existsByReservationIdAndStatus(reservationId, AppealStatus.OPEN)) {
+            throw new BusinessException(ErrorCode.ALREADY_APPEALED);
+        }
+        NoShowAppeal appeal = noShowAppealRepository.save(NoShowAppeal.builder()
+                .reservation(reservation)
+                .member(reservation.getMember())
+                .reason(request.reason())
+                .status(AppealStatus.OPEN)
+                .createdAt(LocalDateTime.now())
+                .build());
+        return AppealResponseDto.from(appeal);
+    }
+
+    public List<AppealResponseDto> getOpenAppeals() {
+        return noShowAppealRepository.findAllByStatusOrderByIdAsc(AppealStatus.OPEN).stream()
+                .map(AppealResponseDto::from)
+                .toList();
+    }
+
+    /**
+     * 이의신청 인용 — NO_SHOW → NO_SHOW_REVOKED + 예약금 환불.
+     * 이미 몰수가 정산에 반영된 뒤라면 다음 회차에서 차감(FR-19)한다 — 정산(P2) 도입 시 이 지점에 조정 기록 연결.
+     */
+    @Transactional
+    public AppealResponseDto acceptAppeal(Long appealId) {
+        NoShowAppeal appeal = getOpenAppeal(appealId);
+        Reservation reservation = reservationRepository.findWithLockById(appeal.getReservation().getId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
+        validateTransition(reservation.getStatus(), ReservationStatus.NO_SHOW_REVOKED);
+        reservation.changeStatus(ReservationStatus.NO_SHOW_REVOKED);
+        paymentService.refundDeposit(reservation);
+        appeal.accept(LocalDateTime.now());
+        eventPublisher.publishEvent(NotificationEvent.of(reservation.getMember().getId(),
+                NotificationType.NO_SHOW_REVOKED,
+                "%s 노쇼 이의신청이 인용되었습니다. 예약금이 환불됩니다.".formatted(describe(reservation))));
+        return AppealResponseDto.from(appeal);
+    }
+
+    @Transactional
+    public AppealResponseDto rejectAppeal(Long appealId) {
+        NoShowAppeal appeal = getOpenAppeal(appealId);
+        appeal.reject(LocalDateTime.now());
+        return AppealResponseDto.from(appeal);
+    }
+
+    private NoShowAppeal getOpenAppeal(Long appealId) {
+        NoShowAppeal appeal = noShowAppealRepository.findById(appealId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.APPEAL_NOT_FOUND));
+        if (!appeal.isOpen()) {
+            throw new BusinessException(ErrorCode.APPEAL_ALREADY_DECIDED);
+        }
+        return appeal;
+    }
+
+    private String describe(Reservation reservation) {
+        return "%s %s %s".formatted(
+                reservation.getSlot().getRestaurant().getName(),
+                reservation.getSlot().getSlotDate(),
+                reservation.getSlot().getSlotTime());
     }
 }

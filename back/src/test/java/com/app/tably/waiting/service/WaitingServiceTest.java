@@ -9,7 +9,9 @@ import com.app.tably.restaurant.entity.Restaurant;
 import com.app.tably.restaurant.repository.RestaurantRepository;
 import com.app.tably.waiting.dto.WaitingRegisterRequestDto;
 import com.app.tably.waiting.entity.Waiting;
+import com.app.tably.waiting.entity.WaitingCounter;
 import com.app.tably.waiting.entity.WaitingStatus;
+import com.app.tably.waiting.repository.WaitingCounterRepository;
 import com.app.tably.waiting.repository.WaitingRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,8 +19,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,6 +30,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class WaitingServiceTest {
@@ -36,10 +40,16 @@ class WaitingServiceTest {
     private WaitingRepository waitingRepository;
 
     @Mock
+    private WaitingCounterRepository waitingCounterRepository;
+
+    @Mock
     private RestaurantRepository restaurantRepository;
 
     @Mock
     private MemberRepository memberRepository;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private WaitingService waitingService;
@@ -59,15 +69,26 @@ class WaitingServiceTest {
     }
 
     @Test
-    @DisplayName("등록은 핵심영역 6(번호 발급) 구현 전까지 UnsupportedOperationException")
-    void register_notImplementedYet() {
+    @DisplayName("등록 — 카운터가 발급한 번호로 WAITING 행이 저장된다 (핵심영역 6)")
+    void register_success() {
+        WaitingCounter counter = new WaitingCounter(10L);
+        counter.issueNext();    // 이미 1번이 발급된 상태 → 이번 등록은 2번
         given(restaurantRepository.findById(10L)).willReturn(Optional.of(restaurant(99L)));
         given(memberRepository.findById(1L)).willReturn(Optional.of(guest(1L)));
         given(waitingRepository.existsByRestaurantIdAndMemberIdAndStatusIn(anyLong(), anyLong(), anyCollection()))
                 .willReturn(false);
+        given(waitingCounterRepository.findWithLockByRestaurantId(10L)).willReturn(Optional.of(counter));
+        given(waitingRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        given(waitingRepository.countByRestaurantIdAndStatusAndWaitingNoLessThan(10L, WaitingStatus.WAITING, 2))
+                .willReturn(1L);
 
-        assertThatThrownBy(() -> waitingService.register(1L, new WaitingRegisterRequestDto(10L)))
-                .isInstanceOf(UnsupportedOperationException.class);
+        var result = waitingService.register(1L, new WaitingRegisterRequestDto(10L));
+
+        assertThat(result.waitingNo()).isEqualTo(2);
+        assertThat(result.status()).isEqualTo(WaitingStatus.WAITING);
+        assertThat(result.aheadCount()).isEqualTo(1L);
+        assertThat(counter.getLastNo()).isEqualTo(2);
+        then(waitingCounterRepository).should().insertIfAbsent(10L);
     }
 
     @Test
@@ -82,6 +103,7 @@ class WaitingServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.ALREADY_WAITING);
+        then(waitingCounterRepository).should(never()).insertIfAbsent(anyLong());
     }
 
     @Test

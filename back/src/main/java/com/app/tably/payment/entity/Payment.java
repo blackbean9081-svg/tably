@@ -60,4 +60,13 @@ public class Payment {
     public void markUnknown() {
         this.status = PaymentStatus.UNKNOWN;
     }
+
+    // 환불 성공 시 원 결제(PAY) 행에 남기는 표시 — 환불 사건 자체는 REFUND 행이 기록한다
+    public void cancel() {
+        this.status = PaymentStatus.CANCELED;
+    }
+
+    public void partialCancel() {
+        this.status = PaymentStatus.PARTIAL_CANCELED;
+    }
 }

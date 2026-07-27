@@ -4,15 +4,20 @@ import com.app.tably.common.exception.BusinessException;
 import com.app.tably.common.exception.ErrorCode;
 import com.app.tably.member.entity.Member;
 import com.app.tably.member.repository.MemberRepository;
+import com.app.tably.notification.entity.NotificationType;
+import com.app.tably.notification.event.NotificationEvent;
 import com.app.tably.restaurant.entity.Restaurant;
 import com.app.tably.restaurant.repository.RestaurantRepository;
 import com.app.tably.waiting.dto.WaitingRegisterRequestDto;
 import com.app.tably.waiting.dto.WaitingResponseDto;
 import com.app.tably.waiting.entity.Waiting;
+import com.app.tably.waiting.entity.WaitingCounter;
 import com.app.tably.waiting.entity.WaitingStatus;
+import com.app.tably.waiting.repository.WaitingCounterRepository;
 import com.app.tably.waiting.repository.WaitingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,23 +38,24 @@ public class WaitingService {
             List.of(WaitingStatus.WAITING, WaitingStatus.CALLED);
 
     private final WaitingRepository waitingRepository;
+    private final WaitingCounterRepository waitingCounterRepository;
     private final RestaurantRepository restaurantRepository;
     private final MemberRepository memberRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    /*
-     * TODO [핵심영역 6 — 대기번호 발급] 개발자 본인이 구현할 것. Claude Code 구현 금지.
-     *
-     * 이 메서드가 만족해야 할 조건 (S6, FR-14):
-     *  1. 같은 식당에 동시 등록해도 대기번호는 중복·누락 없이 발급된다
-     *     — findTopByRestaurantIdOrderByWaitingNoDesc 후 +1 하는 단순 구현은
-     *       check-then-act 경합으로 중복 번호가 나온다. 이를 락/제약/시퀀스로 막을 것
-     *  2. 번호는 식당별로 1부터 단조 증가 (운영일 단위 리셋 여부는 v1에서는 리셋 없음으로 둔다)
-     *  3. 발급 실패 시 waiting 행이 남지 않아야 한다 (번호 없는 대기 금지)
-     *  4. 조회(순번 폴링)가 매우 잦다 — 발급 방식이 조회 성능을 해치지 않을 것
-     *  접근 후보: (a) 식당별 카운터 행 + 비관적 락 (b) DB 시퀀스/유니크 제약 재시도 (c) Redis 전환 시 INCR
+    /**
+     * 핵심영역 6 — 식당별 카운터 행 + 비관적 락 (접근 a).
+     * findTop 후 +1은 check-then-act 경합으로 중복 번호가 나오므로,
+     * 카운터 행을 잠가 발급을 직렬화한다. 등록은 드물고 조회(폴링)가 잦은 도메인이라
+     * 조회 경로에 비용을 얹지 않는 쪽을 택했다. register 트랜잭션에 참여하므로
+     * 저장이 실패하면 번호 증가도 함께 롤백된다 (번호 없는 대기·누락 번호 없음).
      */
     protected int issueWaitingNo(Long restaurantId) {
-        throw new UnsupportedOperationException("핵심영역 6 — 대기번호 발급 미구현");
+        waitingCounterRepository.insertIfAbsent(restaurantId);
+        WaitingCounter counter = waitingCounterRepository.findWithLockByRestaurantId(restaurantId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "waiting_counter 행이 없습니다 — restaurant " + restaurantId));
+        return counter.issueNext();
     }
 
     /**
@@ -103,6 +109,10 @@ public class WaitingService {
                 .findFirstByRestaurantIdAndStatusOrderByWaitingNoAsc(restaurantId, WaitingStatus.WAITING)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NO_WAITING_TO_CALL));
         next.call(LocalDateTime.now());
+        eventPublisher.publishEvent(NotificationEvent.of(next.getMember().getId(),
+                NotificationType.WAITING_CALLED,
+                "%s 입장 순서입니다 (대기 %d번). 10분 내 도착을 확인해주세요.".formatted(
+                        restaurant.getName(), next.getWaitingNo())));
         return WaitingResponseDto.of(next, 0L);
     }
 

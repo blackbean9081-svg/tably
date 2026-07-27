@@ -24,4 +24,7 @@ public interface WaitingRepository extends JpaRepository<Waiting, Long> {
 
     // 호출 10분 만료 배치의 조회 대상
     List<Waiting> findAllByStatusAndCalledAtBefore(WaitingStatus status, LocalDateTime threshold);
+
+    // 동시성 테스트의 검증·정리용
+    List<Waiting> findAllByRestaurantId(Long restaurantId);
 }

@@ -1,6 +1,5 @@
 package com.app.tably.payment.service;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -17,19 +16,8 @@ class RefundCalculatorTest {
     private static final LocalDate VISIT = LocalDate.of(2026, 8, 15);
 
     @Test
-    @DisplayName("환불 계산은 핵심영역 3 구현 전까지 UnsupportedOperationException")
-    void calculate_notImplementedYet() {
-        assertThatThrownBy(() -> calculator.calculate(RULE, VISIT, VISIT.minusDays(7), 40000,
-                RefundCalculator.CancelCause.USER))
-                .isInstanceOf(UnsupportedOperationException.class);
-    }
-
-    // ── 핵심영역 3 구현 후 활성화할 명세 테스트 ────────────────────────────
-
-    @Test
-    @Disabled("핵심영역 3(환불 계산) 구현 후 활성화")
-    @DisplayName("[명세] 손님 귀책 — 7일 전 100%, 5일 전 50%, 3일 전 50%, 1일 전 0%, 당일 0%")
-    void calculate_userCause_spec() {
+    @DisplayName("손님 귀책 — 7일 전 100%, 5일 전 50%, 3일 전 50%, 1일 전 0%, 당일 0%")
+    void calculate_userCause() {
         assertThat(calculator.calculate(RULE, VISIT, VISIT.minusDays(7), 40000, RefundCalculator.CancelCause.USER)).isEqualTo(40000);
         assertThat(calculator.calculate(RULE, VISIT, VISIT.minusDays(5), 40000, RefundCalculator.CancelCause.USER)).isEqualTo(20000);
         assertThat(calculator.calculate(RULE, VISIT, VISIT.minusDays(3), 40000, RefundCalculator.CancelCause.USER)).isEqualTo(20000);
@@ -38,9 +26,39 @@ class RefundCalculatorTest {
     }
 
     @Test
-    @Disabled("핵심영역 3(환불 계산) 구현 후 활성화")
-    @DisplayName("[명세] 식당 귀책은 시점 무관 전액 환불")
-    void calculate_shopCause_spec() {
+    @DisplayName("식당 귀책은 시점 무관 전액 환불 (S8)")
+    void calculate_shopCause() {
         assertThat(calculator.calculate(RULE, VISIT, VISIT, 40000, RefundCalculator.CancelCause.SHOP)).isEqualTo(40000);
+        assertThat(calculator.calculate(RULE, VISIT, VISIT.minusDays(10), 40000, RefundCalculator.CancelCause.SHOP)).isEqualTo(40000);
+    }
+
+    @Test
+    @DisplayName("방문일이 지난 뒤의 취소(음수 잔여 일수)는 0% 처리")
+    void calculate_afterVisitDate() {
+        assertThat(calculator.calculate(RULE, VISIT, VISIT.plusDays(1), 40000, RefundCalculator.CancelCause.USER)).isZero();
+    }
+
+    @Test
+    @DisplayName("규칙 순서가 뒤섞여 있어도 기준 일수 내림차순으로 매칭한다")
+    void calculate_unorderedRule() {
+        assertThat(calculator.calculate("1:0,7:100,3:50", VISIT, VISIT.minusDays(8), 40000,
+                RefundCalculator.CancelCause.USER)).isEqualTo(40000);
+    }
+
+    @Test
+    @DisplayName("깨진 규칙은 조용히 0원 처리하지 않고 예외 — 분쟁 근거 소실 방지 (조건 6)")
+    void calculate_malformedRule() {
+        assertThatThrownBy(() -> calculator.calculate("7-100", VISIT, VISIT.minusDays(7), 40000,
+                RefundCalculator.CancelCause.USER))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> calculator.calculate("7:abc", VISIT, VISIT.minusDays(7), 40000,
+                RefundCalculator.CancelCause.USER))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> calculator.calculate("7:150", VISIT, VISIT.minusDays(7), 40000,
+                RefundCalculator.CancelCause.USER))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> calculator.calculate("", VISIT, VISIT.minusDays(7), 40000,
+                RefundCalculator.CancelCause.USER))
+                .isInstanceOf(IllegalStateException.class);
     }
 }
