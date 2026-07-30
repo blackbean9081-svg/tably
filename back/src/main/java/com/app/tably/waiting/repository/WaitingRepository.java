@@ -3,6 +3,9 @@ package com.app.tably.waiting.repository;
 import com.app.tably.waiting.entity.Waiting;
 import com.app.tably.waiting.entity.WaitingStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -22,8 +25,17 @@ public interface WaitingRepository extends JpaRepository<Waiting, Long> {
     // 대기번호 발급(핵심영역 6)의 재료 — 동시 등록 경합은 발급 로직이 해결할 것
     Optional<Waiting> findTopByRestaurantIdOrderByWaitingNoDesc(Long restaurantId);
 
-    // 호출 10분 만료 배치의 조회 대상
-    List<Waiting> findAllByStatusAndCalledAtBefore(WaitingStatus status, LocalDateTime threshold);
+    @Modifying(clearAutomatically = true)
+    @Query("update Waiting w set w.status = :target where w.id = :id and w.status in :currents")
+    int updateStatusIfCurrentIn(@Param("id") Long id,
+                                @Param("currents") Collection<WaitingStatus> currents,
+                                @Param("target") WaitingStatus target);
+
+    @Modifying(clearAutomatically = true)
+    @Query("update Waiting w set w.status = :target where w.status = :current and w.calledAt < :threshold")
+    int updateStatusAllCalledBefore(@Param("current") WaitingStatus current,
+                                    @Param("threshold") LocalDateTime threshold,
+                                    @Param("target") WaitingStatus target);
 
     // 동시성 테스트의 검증·정리용
     List<Waiting> findAllByRestaurantId(Long restaurantId);

@@ -46,16 +46,4 @@ public class Waiting {
         this.status = WaitingStatus.CALLED;
         this.calledAt = now;
     }
-
-    public void expire() {
-        this.status = WaitingStatus.EXPIRED;
-    }
-
-    public void seat() {
-        this.status = WaitingStatus.SEATED;
-    }
-
-    public void cancel() {
-        this.status = WaitingStatus.CANCELED;
-    }
 }

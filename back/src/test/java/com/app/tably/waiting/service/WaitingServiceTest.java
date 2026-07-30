@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -134,14 +135,89 @@ class WaitingServiceTest {
     }
 
     @Test
-    @DisplayName("호출 후 10분 지난 CALLED는 EXPIRED로 만료된다")
+    @DisplayName("호출 후 10분 지난 CALLED는 조건부 일괄 UPDATE로 EXPIRED — 도착 확인된 행은 덮지 않는다")
     void expireOverdueCalls() {
-        Waiting overdue = waiting(5L, 1L, 3, WaitingStatus.CALLED);
-        given(waitingRepository.findAllByStatusAndCalledAtBefore(any(), any())).willReturn(List.of(overdue));
+        given(waitingRepository.updateStatusAllCalledBefore(eq(WaitingStatus.CALLED), any(), eq(WaitingStatus.EXPIRED)))
+                .willReturn(2);
 
         int count = waitingService.expireOverdueCalls();
 
-        assertThat(count).isEqualTo(1);
-        assertThat(overdue.getStatus()).isEqualTo(WaitingStatus.EXPIRED);
+        assertThat(count).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("도착 확인 — CALLED가 조건부 UPDATE로 SEATED가 된다")
+    void seat_success() {
+        given(waitingRepository.findById(5L)).willReturn(
+                Optional.of(waiting(5L, 1L, 3, WaitingStatus.CALLED)),
+                Optional.of(waiting(5L, 1L, 3, WaitingStatus.SEATED)));
+        given(waitingRepository.updateStatusIfCurrentIn(5L, List.of(WaitingStatus.CALLED), WaitingStatus.SEATED))
+                .willReturn(1);
+
+        var result = waitingService.seat(99L, 5L);
+
+        assertThat(result.status()).isEqualTo(WaitingStatus.SEATED);
+    }
+
+    @Test
+    @DisplayName("만료 배치에 진 도착 확인은 WAITING_NOT_CALLED — 0건 갱신이면 경합 패배")
+    void seat_lostRaceToExpiry() {
+        given(waitingRepository.findById(5L)).willReturn(Optional.of(waiting(5L, 1L, 3, WaitingStatus.CALLED)));
+        given(waitingRepository.updateStatusIfCurrentIn(anyLong(), anyCollection(), any())).willReturn(0);
+
+        assertThatThrownBy(() -> waitingService.seat(99L, 5L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.WAITING_NOT_CALLED);
+    }
+
+    @Test
+    @DisplayName("남의 식당 웨이팅 도착 확인은 NOT_RESTAURANT_OWNER")
+    void seat_notOwner() {
+        given(waitingRepository.findById(5L)).willReturn(Optional.of(waiting(5L, 1L, 3, WaitingStatus.CALLED)));
+
+        assertThatThrownBy(() -> waitingService.seat(7L, 5L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.NOT_RESTAURANT_OWNER);
+        then(waitingRepository).should(never()).updateStatusIfCurrentIn(anyLong(), anyCollection(), any());
+    }
+
+    @Test
+    @DisplayName("본인 취소 — WAITING/CALLED에서 CANCELED로")
+    void cancel_success() {
+        given(waitingRepository.findById(5L)).willReturn(Optional.of(waiting(5L, 1L, 3, WaitingStatus.WAITING)));
+        given(waitingRepository.updateStatusIfCurrentIn(
+                5L, List.of(WaitingStatus.WAITING, WaitingStatus.CALLED), WaitingStatus.CANCELED))
+                .willReturn(1);
+
+        waitingService.cancel(1L, 5L);
+
+        then(waitingRepository).should().updateStatusIfCurrentIn(
+                5L, List.of(WaitingStatus.WAITING, WaitingStatus.CALLED), WaitingStatus.CANCELED);
+    }
+
+    @Test
+    @DisplayName("이미 종료된 웨이팅 취소는 WAITING_ALREADY_CLOSED")
+    void cancel_alreadyClosed() {
+        given(waitingRepository.findById(5L)).willReturn(Optional.of(waiting(5L, 1L, 3, WaitingStatus.EXPIRED)));
+        given(waitingRepository.updateStatusIfCurrentIn(anyLong(), anyCollection(), any())).willReturn(0);
+
+        assertThatThrownBy(() -> waitingService.cancel(1L, 5L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.WAITING_ALREADY_CLOSED);
+    }
+
+    @Test
+    @DisplayName("남의 웨이팅 취소는 NOT_WAITING_OWNER")
+    void cancel_notOwner() {
+        given(waitingRepository.findById(5L)).willReturn(Optional.of(waiting(5L, 1L, 3, WaitingStatus.WAITING)));
+
+        assertThatThrownBy(() -> waitingService.cancel(2L, 5L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.NOT_WAITING_OWNER);
+        then(waitingRepository).should(never()).updateStatusIfCurrentIn(anyLong(), anyCollection(), any());
     }
 }

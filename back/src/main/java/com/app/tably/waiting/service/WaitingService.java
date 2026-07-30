@@ -116,19 +116,48 @@ public class WaitingService {
         return WaitingResponseDto.of(next, 0L);
     }
 
+    @Transactional
+    public WaitingResponseDto seat(Long ownerId, Long waitingId) {
+        Waiting waiting = waitingRepository.findById(waitingId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WAITING_NOT_FOUND));
+        if (!waiting.getRestaurant().isOwnedBy(ownerId)) {
+            throw new BusinessException(ErrorCode.NOT_RESTAURANT_OWNER);
+        }
+        boolean seated = waitingRepository.updateStatusIfCurrentIn(
+                waitingId, List.of(WaitingStatus.CALLED), WaitingStatus.SEATED) == 1;
+        if (!seated) {
+            throw new BusinessException(ErrorCode.WAITING_NOT_CALLED);
+        }
+        return WaitingResponseDto.of(waitingRepository.findById(waitingId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WAITING_NOT_FOUND)), 0L);
+    }
+
+    @Transactional
+    public void cancel(Long memberId, Long waitingId) {
+        Waiting waiting = waitingRepository.findById(waitingId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WAITING_NOT_FOUND));
+        if (!waiting.isOwnedBy(memberId)) {
+            throw new BusinessException(ErrorCode.NOT_WAITING_OWNER);
+        }
+        boolean canceled = waitingRepository.updateStatusIfCurrentIn(
+                waitingId, ACTIVE_STATUSES, WaitingStatus.CANCELED) == 1;
+        if (!canceled) {
+            throw new BusinessException(ErrorCode.WAITING_ALREADY_CLOSED);
+        }
+    }
+
     /**
      * FR-16: 호출 후 10분 미도착 자동 만료 — 스케줄러 진입점.
      */
     @Transactional
     public int expireOverdueCalls() {
         LocalDateTime threshold = LocalDateTime.now().minus(CALL_TIMEOUT);
-        List<Waiting> overdue = waitingRepository
-                .findAllByStatusAndCalledAtBefore(WaitingStatus.CALLED, threshold);
-        overdue.forEach(Waiting::expire);
-        if (!overdue.isEmpty()) {
-            log.info("호출 만료 처리 {}건", overdue.size());
+        int expired = waitingRepository.updateStatusAllCalledBefore(
+                WaitingStatus.CALLED, threshold, WaitingStatus.EXPIRED);
+        if (expired > 0) {
+            log.info("호출 만료 처리 {}건", expired);
         }
-        return overdue.size();
+        return expired;
     }
 
     private Long aheadCount(Waiting waiting) {

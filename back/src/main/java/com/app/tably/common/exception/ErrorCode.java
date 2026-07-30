@@ -57,9 +57,11 @@ public enum ErrorCode {
 
     // waiting
     WAITING_NOT_FOUND(HttpStatus.NOT_FOUND, "웨이팅 내역을 찾을 수 없습니다."),
-    NOT_WAITING_OWNER(HttpStatus.FORBIDDEN, "본인의 웨이팅만 조회할 수 있습니다."),
+    NOT_WAITING_OWNER(HttpStatus.FORBIDDEN, "본인의 웨이팅만 처리할 수 있습니다."),
     ALREADY_WAITING(HttpStatus.CONFLICT, "이미 대기 중인 웨이팅이 있습니다."),
-    NO_WAITING_TO_CALL(HttpStatus.CONFLICT, "호출할 대기 팀이 없습니다.");
+    NO_WAITING_TO_CALL(HttpStatus.CONFLICT, "호출할 대기 팀이 없습니다."),
+    WAITING_NOT_CALLED(HttpStatus.CONFLICT, "호출된 대기만 입장 처리할 수 있습니다."),
+    WAITING_ALREADY_CLOSED(HttpStatus.CONFLICT, "이미 종료된 웨이팅입니다.");
 
     private final HttpStatus status;
     private final String message;
