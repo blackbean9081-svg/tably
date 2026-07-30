@@ -38,12 +38,16 @@ public class ReservationPolicy {
     @Column(name = "slot_times", nullable = false)
     private String slotTimes;
 
+    @Column(name = "closed_days")
+    private String closedDays;
+
     public void update(int depositPerPerson, String refundRule, String openRule,
-                       int tablesPerTime, String slotTimes) {
+                       int tablesPerTime, String slotTimes, String closedDays) {
         this.depositPerPerson = depositPerPerson;
         this.refundRule = refundRule;
         this.openRule = openRule;
         this.tablesPerTime = tablesPerTime;
         this.slotTimes = slotTimes;
+        this.closedDays = closedDays;
     }
 }

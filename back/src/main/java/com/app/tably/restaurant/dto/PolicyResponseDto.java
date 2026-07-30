@@ -9,7 +9,8 @@ public record PolicyResponseDto(
         String refundRule,
         String openRule,
         int tablesPerTime,
-        String slotTimes
+        String slotTimes,
+        String closedDays
 ) {
 
     public static PolicyResponseDto from(ReservationPolicy policy) {
@@ -20,7 +21,8 @@ public record PolicyResponseDto(
                 policy.getRefundRule(),
                 policy.getOpenRule(),
                 policy.getTablesPerTime(),
-                policy.getSlotTimes()
+                policy.getSlotTimes(),
+                policy.getClosedDays()
         );
     }
 }

@@ -56,7 +56,8 @@ public class RestaurantService {
         ReservationPolicy policy = policyRepository.findByRestaurantId(restaurantId)
                 .map(existing -> {
                     existing.update(request.depositPerPerson(), request.refundRule(),
-                            request.openRule(), request.tablesPerTime(), request.slotTimes());
+                            request.openRule(), request.tablesPerTime(), request.slotTimes(),
+                            request.closedDays());
                     return existing;
                 })
                 .orElseGet(() -> policyRepository.save(ReservationPolicy.builder()
@@ -66,6 +67,7 @@ public class RestaurantService {
                         .openRule(request.openRule())
                         .tablesPerTime(request.tablesPerTime())
                         .slotTimes(request.slotTimes())
+                        .closedDays(request.closedDays())
                         .build()));
         return PolicyResponseDto.from(policy);
     }
