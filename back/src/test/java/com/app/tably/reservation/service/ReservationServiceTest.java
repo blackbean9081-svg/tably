@@ -25,6 +25,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -41,6 +42,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willReturn;
 import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
@@ -63,6 +65,10 @@ class ReservationServiceTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    // 게이트는 1막 기본값(무조건 통과)으로 두고, 게이트 자체 동작은 RedisSlotHoldGateTest에서 검증
+    @Spy
+    private SlotHoldGate slotHoldGate = new NoopSlotHoldGate();
 
     @InjectMocks
     private ReservationService reservationService;
@@ -156,6 +162,31 @@ class ReservationServiceTest {
         then(reservationRepository).should().save(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(ReservationStatus.PENDING_PAYMENT);
         assertThat(captor.getValue().getHeldAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("게이트가 거절하면 DB에 닿지 않고 즉시 SLOT_ALREADY_TAKEN (2막 Redis 게이트 경로)")
+    void hold_gateRejected() {
+        willReturn(false).given(slotHoldGate).tryAcquire(20L, 1L);
+
+        assertThatThrownBy(() -> reservationService.hold(1L, new ReservationHoldRequestDto(20L, 2)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.SLOT_ALREADY_TAKEN);
+        then(slotRepository).shouldHaveNoInteractions();
+        then(reservationRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("게이트 통과 후 선점이 실패하면 게이트를 즉시 되돌린다 — 슬롯이 TTL까지 헛묶이지 않게")
+    void hold_releasesGateOnFailure() {
+        given(slotRepository.findWithLockById(20L)).willReturn(Optional.of(openSlot()));
+        given(reservationRepository.existsBySlotIdAndStatusIn(20L,
+                List.of(ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED))).willReturn(true);
+
+        assertThatThrownBy(() -> reservationService.hold(1L, new ReservationHoldRequestDto(20L, 2)))
+                .isInstanceOf(BusinessException.class);
+        then(slotHoldGate).should().release(20L);
     }
 
     @Test

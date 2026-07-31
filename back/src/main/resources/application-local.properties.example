@@ -2,3 +2,6 @@
 # jwt.secret은 base64 인코딩된 32바이트 이상 랜덤 키
 spring.datasource.password=your-db-password
 jwt.secret=your-base64-encoded-secret-key-at-least-32-bytes
+
+# 2막 Redis 전환 토글 (기본 db) — k6 전후 비교 시 주석 해제 후 재기동 (로컬 Redis 필요)
+#tably.slot-hold.mode=redis

@@ -50,6 +50,7 @@ public class ReservationService {
     private final MemberRepository memberRepository;
     private final PaymentService paymentService;
     private final ApplicationEventPublisher eventPublisher;
+    private final SlotHoldGate slotHoldGate;
 
     /*
      * TODO [핵심영역 1 — 슬롯 선점 (락)] 개발자 본인이 구현할 것. Claude Code 구현 금지.
@@ -71,40 +72,51 @@ public class ReservationService {
      */
     @Transactional
     public Long hold(Long memberId, ReservationHoldRequestDto request) {
-
-        Slot slot;
-        try {
-            slot = slotRepository.findWithLockById(request.slotId())
-                    .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
-
-            if (slot.getStatus() == SlotStatus.CLOSED) {
-                throw new BusinessException(ErrorCode.SLOT_CLOSED);
-            }
-        } catch (PessimisticLockingFailureException e) {
-           throw new BusinessException(ErrorCode.SLOT_ALREADY_TAKEN);
-        }
-
-        boolean taken = reservationRepository.existsBySlotIdAndStatusIn(slot.getId(),
-                List.of(ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED));
-
-        if (taken) {
+        // 2막: Redis 게이트(mode=redis)면 패자는 DB에 닿기 전에 여기서 즉시 409.
+        // 1막(mode=db)은 무조건 통과 — 아래 DB 락 경로가 그대로 기준선이 된다.
+        if (!slotHoldGate.tryAcquire(request.slotId(), memberId)) {
             throw new BusinessException(ErrorCode.SLOT_ALREADY_TAKEN);
         }
+        try {
+            Slot slot;
+            try {
+                slot = slotRepository.findWithLockById(request.slotId())
+                        .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
 
-        Member member = memberRepository.findById(memberId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+                if (slot.getStatus() == SlotStatus.CLOSED) {
+                    throw new BusinessException(ErrorCode.SLOT_CLOSED);
+                }
+            } catch (PessimisticLockingFailureException e) {
+                throw new BusinessException(ErrorCode.SLOT_ALREADY_TAKEN);
+            }
 
-        Reservation reservation = Reservation.builder()
-                .slot(slot)
-                .member(member)
-                .partySize(request.partySize())
-                .status(ReservationStatus.PENDING_PAYMENT)
-                .heldAt(LocalDateTime.now())
-                .build();
+            boolean taken = reservationRepository.existsBySlotIdAndStatusIn(slot.getId(),
+                    List.of(ReservationStatus.PENDING_PAYMENT, ReservationStatus.CONFIRMED));
 
-        Reservation saved = reservationRepository.save(reservation);
+            if (taken) {
+                throw new BusinessException(ErrorCode.SLOT_ALREADY_TAKEN);
+            }
 
-        return saved.getId();
+            Member member = memberRepository.findById(memberId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+
+            Reservation reservation = Reservation.builder()
+                    .slot(slot)
+                    .member(member)
+                    .partySize(request.partySize())
+                    .status(ReservationStatus.PENDING_PAYMENT)
+                    .heldAt(LocalDateTime.now())
+                    .build();
+
+            Reservation saved = reservationRepository.save(reservation);
+
+            return saved.getId();
+        } catch (RuntimeException e) {
+            // 게이트만 잡고 예약을 못 만든 채 끝나면 슬롯이 TTL(10분)까지 헛묶인다 — 즉시 되돌린다.
+            // (커밋 자체가 실패하는 드문 경우는 되돌리지 못하지만 TTL이 수습한다)
+            slotHoldGate.release(request.slotId());
+            throw e;
+        }
     }
 
     /**
@@ -160,6 +172,8 @@ public class ReservationService {
         }
         validateTransition(reservation.getStatus(), ReservationStatus.CANCELED_BY_USER);
         reservation.changeStatus(ReservationStatus.CANCELED_BY_USER);
+        // 취소된 슬롯은 다시 예약 가능해야 한다 (S4) — TTL이 남은 게이트를 즉시 되돌린다
+        slotHoldGate.release(reservation.getSlot().getId());
         int refunded = paymentService.refundOnCancel(reservation, RefundCalculator.CancelCause.USER);
         eventPublisher.publishEvent(NotificationEvent.of(memberId, NotificationType.RESERVATION_CANCELED,
                 "%s 예약이 취소되었습니다. 환불 예정액 %,d원.".formatted(describe(reservation), refunded)));
@@ -192,6 +206,7 @@ public class ReservationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
         validateTransition(reservation.getStatus(), ReservationStatus.CANCELED_BY_SHOP);
         reservation.changeStatus(ReservationStatus.CANCELED_BY_SHOP);
+        slotHoldGate.release(reservation.getSlot().getId());
         paymentService.refundOnCancel(reservation, RefundCalculator.CancelCause.SHOP);
         eventPublisher.publishEvent(NotificationEvent.of(reservation.getMember().getId(),
                 NotificationType.RESERVATION_CANCELED,
