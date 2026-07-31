@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -28,10 +29,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willReturn;
 import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,6 +54,10 @@ class WaitingServiceTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    // 1막 기본값(항상 empty → DB 폴백)으로 두고, Redis 인덱스 동작은 RedisWaitingRankIndexTest에서 검증
+    @Spy
+    private WaitingRankIndex rankIndex = new NoopWaitingRankIndex();
 
     @InjectMocks
     private WaitingService waitingService;
@@ -118,6 +125,32 @@ class WaitingServiceTest {
 
         assertThat(result.aheadCount()).isEqualTo(7L);
         assertThat(result.waitingNo()).isEqualTo(12);
+    }
+
+    @Test
+    @DisplayName("순번 조회 — 인덱스(2막 Redis)가 답하면 DB count 없이 그 값을 쓴다")
+    void getMyWaiting_indexAnswers() {
+        given(waitingRepository.findById(5L)).willReturn(Optional.of(waiting(5L, 1L, 12, WaitingStatus.WAITING)));
+        willReturn(Optional.of(3L)).given(rankIndex).aheadCount(10L, 5L, 12);
+
+        var result = waitingService.getMyWaiting(1L, 5L);
+
+        assertThat(result.aheadCount()).isEqualTo(3L);
+        then(waitingRepository).should(never())
+                .countByRestaurantIdAndStatusAndWaitingNoLessThan(anyLong(), any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("등록은 인덱스에 추가, 호출·취소는 인덱스에서 제거된다 (커밋 후 반영)")
+    void rankIndex_syncOnRegisterCallCancel() {
+        Waiting next = waiting(5L, 1L, 3, WaitingStatus.WAITING);
+        given(restaurantRepository.findById(10L)).willReturn(Optional.of(restaurant(99L)));
+        given(waitingRepository.findFirstByRestaurantIdAndStatusOrderByWaitingNoAsc(10L, WaitingStatus.WAITING))
+                .willReturn(Optional.of(next));
+
+        waitingService.callNext(99L, 10L);
+
+        then(rankIndex).should().remove(10L, 5L);
     }
 
     @Test
