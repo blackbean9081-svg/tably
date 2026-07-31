@@ -46,6 +46,15 @@ class RefundCalculatorTest {
     }
 
     @Test
+    @DisplayName("rate — 사전 고지용 환불율: 시점별 %를 그대로 노출, 식당 귀책은 100")
+    void rate_forPreview() {
+        assertThat(calculator.rate(RULE, VISIT, VISIT.minusDays(7), RefundCalculator.CancelCause.USER)).isEqualTo(100);
+        assertThat(calculator.rate(RULE, VISIT, VISIT.minusDays(3), RefundCalculator.CancelCause.USER)).isEqualTo(50);
+        assertThat(calculator.rate(RULE, VISIT, VISIT, RefundCalculator.CancelCause.USER)).isZero();
+        assertThat(calculator.rate(RULE, VISIT, VISIT, RefundCalculator.CancelCause.SHOP)).isEqualTo(100);
+    }
+
+    @Test
     @DisplayName("깨진 규칙은 조용히 0원 처리하지 않고 예외 — 분쟁 근거 소실 방지 (조건 6)")
     void calculate_malformedRule() {
         assertThatThrownBy(() -> calculator.calculate("7-100", VISIT, VISIT.minusDays(7), 40000,

@@ -4,8 +4,8 @@ import {
   ApiError,
   cancelReservation,
   getMyReservations,
-  getPaymentsFor,
   getPolicy,
+  getRefundPreview,
 } from '../api'
 import { daysUntil, refundAmountFor, refundPercentFor } from '../lib/refund'
 
@@ -47,22 +47,25 @@ export default function MyReservationsPage() {
     }
   }, [reloadKey])
 
-  // 취소 버튼 → 환불액을 계산해 사전 고지 시트를 연다
+  // 취소 버튼 → 환불액 사전 고지 시트를 연다.
+  // 실제 예약은 서버 계산(refund-preview) — 고지액과 실제 환불액의 계산 경로를 하나로 맞춘다.
+  // 목 예약(id 음수)은 백엔드에 없으므로 기존 클라이언트 계산을 유지한다.
   const openCancel = async (reservation) => {
     setBanner(null)
     try {
-      const policy = await getPolicy(reservation.restaurantId)
-      let paid = 0
-      if (reservation.status === 'CONFIRMED') {
-        if (reservation.depositAmount != null) {
-          paid = reservation.depositAmount // 목 예약: 결제액을 직접 보관
-        } else {
-          const payments = await getPaymentsFor(reservation.id)
-          paid = payments
-            .filter((p) => p.type === 'PAY' && p.status === 'APPROVED')
-            .reduce((sum, p) => sum + p.amount, 0)
-        }
+      if (reservation.id > 0) {
+        const preview = await getRefundPreview(reservation.id)
+        setCancelTarget({
+          reservation,
+          paid: preview.paidAmount,
+          daysLeft: preview.daysLeft,
+          percent: preview.refundRate,
+          refund: preview.refundAmount,
+        })
+        return
       }
+      const policy = await getPolicy(reservation.restaurantId)
+      const paid = reservation.status === 'CONFIRMED' ? reservation.depositAmount ?? 0 : 0
       const daysLeft = daysUntil(reservation.slotDate)
       setCancelTarget({
         reservation,

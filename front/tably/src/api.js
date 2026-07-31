@@ -206,6 +206,13 @@ export function getPaymentsFor(reservationId) {
   return request(`/api/payments/reservations/${reservationId}`)
 }
 
+// S4: 취소 전 환불액 사전 고지 — 서버 계산 (취소 확정과 같은 계산 경로).
+// 실제 예약(id 양수)만 호출 가능. 목 예약은 lib/refund.js 클라이언트 계산을 쓴다.
+// 응답: { reservationId, status, cancelable, paidAmount, refundRate, refundAmount, daysLeft, visitDate, refundRule }
+export function getRefundPreview(reservationId) {
+  return request(`/api/reservations/${reservationId}/refund-preview`)
+}
+
 // ── 웨이팅 (② 화면에서 사용) ─────────────────────────────────────────
 let mockWaiting = null
 

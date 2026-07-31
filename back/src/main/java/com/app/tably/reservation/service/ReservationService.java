@@ -10,6 +10,7 @@ import com.app.tably.payment.service.PaymentService;
 import com.app.tably.payment.service.RefundCalculator;
 import com.app.tably.reservation.dto.AppealRequestDto;
 import com.app.tably.reservation.dto.AppealResponseDto;
+import com.app.tably.reservation.dto.RefundPreviewResponseDto;
 import com.app.tably.reservation.dto.ReservationHoldRequestDto;
 import com.app.tably.reservation.dto.ReservationResponseDto;
 import com.app.tably.reservation.entity.AppealStatus;
@@ -131,6 +132,19 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.NOT_RESERVATION_OWNER);
         }
         return ReservationResponseDto.from(reservation);
+    }
+
+    /**
+     * S4: 취소 전 환불액 사전 고지 — "지금 취소하면 환불액 N원" 확인 화면의 근거.
+     * 계산은 취소 확정 경로와 동일한 계산기를 쓰는 PaymentService에 위임한다.
+     */
+    public RefundPreviewResponseDto getRefundPreview(Long memberId, Long reservationId) {
+        Reservation reservation = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
+        if (!reservation.isOwnedBy(memberId)) {
+            throw new BusinessException(ErrorCode.NOT_RESERVATION_OWNER);
+        }
+        return paymentService.previewRefund(reservation);
     }
 
     /**

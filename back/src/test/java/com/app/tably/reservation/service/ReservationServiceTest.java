@@ -118,6 +118,19 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("남의 예약 환불액 사전 고지 조회는 NOT_RESERVATION_OWNER 예외 — 계산 위임 전에 차단")
+    void getRefundPreview_notOwner() {
+        given(reservationRepository.findById(100L))
+                .willReturn(Optional.of(reservation(100L, 1L, ReservationStatus.CONFIRMED)));
+
+        assertThatThrownBy(() -> reservationService.getRefundPreview(2L, 100L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.NOT_RESERVATION_OWNER);
+        then(paymentService).shouldHaveNoInteractions();
+    }
+
+    @Test
     @DisplayName("없는 슬롯 선점은 SLOT_NOT_FOUND")
     void hold_slotNotFound() {
         given(slotRepository.findWithLockById(20L)).willReturn(Optional.empty());
