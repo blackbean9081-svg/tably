@@ -55,3 +55,21 @@ psql -U postgres -d tably -f verify.sql
 
 성공한 선점은 PENDING_PAYMENT 상태로 슬롯을 10분간 점유한다.
 만료 배치(HoldExpiryScheduler)를 기다리거나 `cleanup.sql`로 즉시 해제 후 재실행.
+
+## 2막: DB 락 vs Redis 게이트 전후 비교
+
+같은 시나리오를 모드만 바꿔 두 번 돌린다 (코드 변경 없음, `application-local.properties`에서 전환):
+
+```properties
+# 1차 실행 (기준선 — 1막 DB 락)
+tably.slot-hold.mode=db
+
+# 2차 실행 (2막 — Redis SET NX 게이트, 로컬 Redis 필요)
+tably.slot-hold.mode=redis
+```
+
+- Redis 모드는 로컬 Redis(기본 localhost:6379)가 있어야 의미가 있다. 없으면 fail-open으로
+  DB 경로와 동일하게 동작해 비교가 되지 않는다 (서버 로그의 "fail-open" 경고로 확인 가능).
+- 재실행 시 cleanup.sql과 함께 Redis 게이트 키도 비울 것: `redis-cli --scan --pattern "slot:hold:*" | xargs redis-cli del`
+  (또는 10분 TTL 소멸 대기)
+- 기록할 비교 수치: `http_req_duration{operation:hold}` p95 (성공·실패 포함), verify.sql 중복 0건은 두 모드 공통 전제.

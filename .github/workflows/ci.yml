@@ -27,6 +27,16 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      # 2막 Redis 경로 통합 테스트용 (Redis*Test — 로컬에 Redis 없으면 스킵되는 테스트들을 CI에서는 실행)
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       SPRING_DATASOURCE_PASSWORD: postgres
       JWT_SECRET: Y2ktb25seS1kdW1teS1qd3Qtc2VjcmV0LWtleS0zMmJ5dGVzISE=
