@@ -40,7 +40,7 @@ function WaitingView({ restaurant }) {
     setError(null)
     setRegistering(true)
     try {
-      setWaiting(await registerWaiting(restaurant.id, restaurant.name))
+      setWaiting(await registerWaiting(restaurant.id))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '웨이팅 등록에 실패했습니다.')
     } finally {
