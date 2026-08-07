@@ -99,7 +99,7 @@ function ReservationView({ restaurant, policy }) {
     setConfirmation(null)
     setHolding(true)
     try {
-      const held = await holdSlot(restaurant, slot, partySize, depositAmount)
+      const held = await holdSlot(slot, partySize, depositAmount)
       setReservation(held)
       setSheetOpen(true)
     } catch (e) {

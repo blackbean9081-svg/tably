@@ -16,6 +16,8 @@ public record PolicyRequestDto(
         String refundRule,
 
         @NotBlank
+        @Pattern(regexp = "^MONTHLY:([1-9]|[12]\\d|3[01]):([01]\\d|2[0-3]):[0-5]\\d$",
+                message = "형식: MONTHLY:일:HH:mm (예: MONTHLY:1:10:00)")
         String openRule,
 
         @Positive
@@ -24,6 +26,10 @@ public record PolicyRequestDto(
         // "HH:mm" 콤마 구분 (예: 18:00,20:30)
         @NotBlank
         @Pattern(regexp = "^([01]\\d|2[0-3]):[0-5]\\d(,([01]\\d|2[0-3]):[0-5]\\d)*$", message = "형식: HH:mm,HH:mm (예: 18:00,20:30)")
-        String slotTimes
+        String slotTimes,
+
+        @Pattern(regexp = "^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)(,(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY))*$",
+                message = "형식: DayOfWeek 이름 콤마 구분 (예: MONDAY,TUESDAY)")
+        String closedDays
 ) {
 }

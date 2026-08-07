@@ -12,19 +12,25 @@ import com.app.tably.slot.entity.Slot;
 import com.app.tably.slot.entity.SlotStatus;
 import com.app.tably.slot.repository.SlotRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
+@Slf4j
 public class SlotService {
 
     private final SlotRepository slotRepository;
@@ -56,9 +62,13 @@ public class SlotService {
         List<LocalTime> times = Arrays.stream(policy.getSlotTimes().split(","))
                 .map(LocalTime::parse)
                 .toList();
+        Set<DayOfWeek> closedDays = parseClosedDays(policy.getClosedDays());
 
         List<Slot> slots = new ArrayList<>();
         for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
+            if (closedDays.contains(date.getDayOfWeek())) {
+                continue;
+            }
             for (LocalTime time : times) {
                 for (int tableNo = 1; tableNo <= policy.getTablesPerTime(); tableNo++) {
                     slots.add(Slot.builder()
@@ -75,6 +85,31 @@ public class SlotService {
         return slots.size();
     }
 
+    @Transactional
+    public int openDueMonthlySlots(LocalDateTime now) {
+        int opened = 0;
+        for (ReservationPolicy policy : policyRepository.findAll()) {
+            try {
+                if (!isOpenDue(policy.getOpenRule(), now)) {
+                    continue;
+                }
+                Restaurant restaurant = policy.getRestaurant();
+                YearMonth target = YearMonth.from(now).plusMonths(1);
+                if (slotRepository.existsByRestaurantIdAndSlotDateBetween(
+                        restaurant.getId(), target.atDay(1), target.atEndOfMonth())) {
+                    continue;
+                }
+                int count = generateMonthlySlots(restaurant.getOwner().getId(), restaurant.getId(),
+                        new SlotGenerateRequestDto(target.toString()));
+                log.info("슬롯 자동 오픈 — {} {}월분 {}개", restaurant.getName(), target, count);
+                opened++;
+            } catch (Exception e) {
+                log.warn("슬롯 자동 오픈 실패 — policy {}: {}", policy.getId(), e.getMessage());
+            }
+        }
+        return opened;
+    }
+
     /**
      * FR-03: 날짜별 슬롯 조회. 오픈런 때 가장 잦은 호출 — 예약 여부 표시는 예약 도메인 합류 시 확장.
      */
@@ -86,5 +121,24 @@ public class SlotService {
                 .stream()
                 .map(SlotResponseDto::from)
                 .toList();
+    }
+
+    private Set<DayOfWeek> parseClosedDays(String closedDays) {
+        if (closedDays == null || closedDays.isBlank()) {
+            return Set.of();
+        }
+        return Arrays.stream(closedDays.split(","))
+                .map(DayOfWeek::valueOf)
+                .collect(Collectors.toSet());
+    }
+
+    private boolean isOpenDue(String openRule, LocalDateTime now) {
+        String[] parts = openRule.split(":", 3);
+        if (parts.length != 3 || !"MONTHLY".equals(parts[0])) {
+            return false;
+        }
+        YearMonth month = YearMonth.from(now);
+        int day = Math.min(Integer.parseInt(parts[1]), month.lengthOfMonth());
+        return !now.isBefore(month.atDay(day).atTime(LocalTime.parse(parts[2])));
     }
 }

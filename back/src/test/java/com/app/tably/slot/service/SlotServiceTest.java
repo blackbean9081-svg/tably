@@ -19,7 +19,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -76,6 +78,71 @@ class SlotServiceTest {
         assertThat(captor.getValue()).hasSize(248);
         assertThat(captor.getValue().getFirst().getSlotDate()).isEqualTo(LocalDate.of(2026, 8, 1));
         assertThat(captor.getValue().getLast().getSlotDate()).isEqualTo(LocalDate.of(2026, 8, 31));
+    }
+
+    @Test
+    @DisplayName("정기 휴무 요일은 슬롯을 생성하지 않는다 — 2026-08 월요일 5일 제외 = 208개 (S1)")
+    void generate_skipsClosedDays() {
+        Restaurant restaurant = restaurant(1L);
+        ReservationPolicy policy = ReservationPolicy.builder()
+                .id(100L).restaurant(restaurant)
+                .depositPerPerson(20000).refundRule("7:100,3:50,1:0")
+                .openRule("MONTHLY:1:10:00").tablesPerTime(4).slotTimes("18:00,20:30")
+                .closedDays("MONDAY")
+                .build();
+        given(restaurantRepository.findById(10L)).willReturn(Optional.of(restaurant));
+        given(policyRepository.findByRestaurantId(10L)).willReturn(Optional.of(policy));
+        given(slotRepository.existsByRestaurantIdAndSlotDateBetween(anyLong(), any(), any())).willReturn(false);
+
+        int count = slotService.generateMonthlySlots(1L, 10L, new SlotGenerateRequestDto("2026-08"));
+
+        assertThat(count).isEqualTo((31 - 5) * 2 * 4);
+        ArgumentCaptor<List<Slot>> captor = ArgumentCaptor.forClass(List.class);
+        verify(slotRepository).saveAll(captor.capture());
+        assertThat(captor.getValue())
+                .noneMatch(slot -> slot.getSlotDate().getDayOfWeek() == DayOfWeek.MONDAY);
+    }
+
+    @Test
+    @DisplayName("오픈 시각(매월 1일 10:00) 도래 — 다음 달 슬롯이 자동 생성된다 (FR-02)")
+    void openDue_generatesNextMonth() {
+        Restaurant restaurant = restaurant(1L);
+        ReservationPolicy policy = policy(restaurant);
+        given(policyRepository.findAll()).willReturn(List.of(policy));
+        given(slotRepository.existsByRestaurantIdAndSlotDateBetween(anyLong(), any(), any())).willReturn(false);
+        given(restaurantRepository.findById(10L)).willReturn(Optional.of(restaurant));
+        given(policyRepository.findByRestaurantId(10L)).willReturn(Optional.of(policy));
+
+        int opened = slotService.openDueMonthlySlots(LocalDateTime.of(2026, 8, 1, 10, 0));
+
+        assertThat(opened).isEqualTo(1);
+        ArgumentCaptor<List<Slot>> captor = ArgumentCaptor.forClass(List.class);
+        verify(slotRepository).saveAll(captor.capture());
+        assertThat(captor.getValue()).hasSize(30 * 2 * 4);
+        assertThat(captor.getValue().getFirst().getSlotDate()).isEqualTo(LocalDate.of(2026, 9, 1));
+    }
+
+    @Test
+    @DisplayName("오픈 시각 전에는 자동 생성하지 않는다")
+    void openDue_beforeOpenTime() {
+        given(policyRepository.findAll()).willReturn(List.of(policy(restaurant(1L))));
+
+        int opened = slotService.openDueMonthlySlots(LocalDateTime.of(2026, 8, 1, 9, 59));
+
+        assertThat(opened).isZero();
+        verify(slotRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("다음 달 슬롯이 이미 있으면 건너뛴다 — 매분 재실행 안전")
+    void openDue_alreadyGenerated() {
+        given(policyRepository.findAll()).willReturn(List.of(policy(restaurant(1L))));
+        given(slotRepository.existsByRestaurantIdAndSlotDateBetween(anyLong(), any(), any())).willReturn(true);
+
+        int opened = slotService.openDueMonthlySlots(LocalDateTime.of(2026, 8, 1, 10, 0));
+
+        assertThat(opened).isZero();
+        verify(slotRepository, never()).saveAll(any());
     }
 
     @Test

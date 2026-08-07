@@ -14,6 +14,7 @@ import com.app.tably.payment.pg.PgDeclinedException;
 import com.app.tably.payment.pg.PgInquiryResult;
 import com.app.tably.payment.pg.PgTimeoutException;
 import com.app.tably.payment.repository.PaymentRepository;
+import com.app.tably.reservation.dto.RefundPreviewResponseDto;
 import com.app.tably.reservation.entity.Reservation;
 import com.app.tably.reservation.entity.ReservationStatus;
 import com.app.tably.reservation.repository.ReservationRepository;
@@ -28,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -276,6 +278,30 @@ public class PaymentService {
                         paid.partialCancel();
                     }
                 });
+    }
+
+    /**
+     * S4: 취소 전 환불액 사전 고지. 취소 확정 시의 refundOnCancel과 같은 계산기·같은 규칙을 쓴다 —
+     * 고지액과 실제 환불액이 다르면 그 자체가 분쟁이 되므로, 계산 경로를 하나로 유지한다.
+     * 결제 전(PENDING_PAYMENT 등)이면 결제액 0원 → 환불액 0원으로 응답한다.
+     */
+    public RefundPreviewResponseDto previewRefund(Reservation reservation) {
+        Payment paid = paymentRepository.findFirstByReservationIdAndTypeAndStatusOrderByIdDesc(
+                        reservation.getId(), PaymentType.PAY, PaymentStatus.APPROVED)
+                .orElse(null);
+        String refundRule = policyOf(reservation).getRefundRule();
+        LocalDate visitDate = reservation.getSlot().getSlotDate();
+        LocalDate today = LocalDate.now();
+        int paidAmount = paid == null ? 0 : paid.getAmount();
+        int rate = refundCalculator.rate(refundRule, visitDate, today, RefundCalculator.CancelCause.USER);
+        int refundAmount = refundCalculator.calculate(refundRule, visitDate, today,
+                paidAmount, RefundCalculator.CancelCause.USER);
+        return new RefundPreviewResponseDto(
+                reservation.getId(),
+                reservation.getStatus(),
+                reservation.getStatus().canTransitionTo(ReservationStatus.CANCELED_BY_USER),
+                paidAmount, rate, refundAmount,
+                ChronoUnit.DAYS.between(today, visitDate), visitDate, refundRule);
     }
 
     /**

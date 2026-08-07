@@ -39,4 +39,18 @@ public class WaitingController {
         return ApiResponse.ok(waitingService.callNext(
                 (Long) authentication.getPrincipal(), restaurantId));
     }
+
+    @PostMapping("/{waitingId}/seat")
+    @PreAuthorize("hasRole('OWNER')")
+    public ApiResponse<WaitingResponseDto> seat(Authentication authentication,
+                                                @PathVariable Long waitingId) {
+        return ApiResponse.ok(waitingService.seat(
+                (Long) authentication.getPrincipal(), waitingId));
+    }
+
+    @PostMapping("/{waitingId}/cancel")
+    public ApiResponse<Void> cancel(Authentication authentication, @PathVariable Long waitingId) {
+        waitingService.cancel((Long) authentication.getPrincipal(), waitingId);
+        return ApiResponse.ok();
+    }
 }

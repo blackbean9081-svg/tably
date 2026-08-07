@@ -1,13 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  ApiError,
-  cancelReservation,
-  getMyReservations,
-  getPaymentsFor,
-  getPolicy,
-} from '../api'
-import { daysUntil, refundAmountFor, refundPercentFor } from '../lib/refund'
+import { ApiError, cancelReservation, getMyReservations, getRefundPreview } from '../api'
 
 const hhmm = (t) => t.slice(0, 5)
 
@@ -47,29 +40,18 @@ export default function MyReservationsPage() {
     }
   }, [reloadKey])
 
-  // 취소 버튼 → 환불액을 계산해 사전 고지 시트를 연다
+  // 취소 버튼 → 환불액 사전 고지 시트를 연다.
+  // 서버 계산(refund-preview) — 고지액과 실제 환불액의 계산 경로를 하나로 맞춘다.
   const openCancel = async (reservation) => {
     setBanner(null)
     try {
-      const policy = await getPolicy(reservation.restaurantId)
-      let paid = 0
-      if (reservation.status === 'CONFIRMED') {
-        if (reservation.depositAmount != null) {
-          paid = reservation.depositAmount // 목 예약: 결제액을 직접 보관
-        } else {
-          const payments = await getPaymentsFor(reservation.id)
-          paid = payments
-            .filter((p) => p.type === 'PAY' && p.status === 'APPROVED')
-            .reduce((sum, p) => sum + p.amount, 0)
-        }
-      }
-      const daysLeft = daysUntil(reservation.slotDate)
+      const preview = await getRefundPreview(reservation.id)
       setCancelTarget({
         reservation,
-        paid,
-        daysLeft,
-        percent: refundPercentFor(policy.refundRule, daysLeft),
-        refund: refundAmountFor(policy.refundRule, daysLeft, paid),
+        paid: preview.paidAmount,
+        daysLeft: preview.daysLeft,
+        percent: preview.refundRate,
+        refund: preview.refundAmount,
       })
     } catch (e) {
       setBanner({ type: 'error', message: e.message })
@@ -140,13 +122,6 @@ export default function MyReservationsPage() {
           )
         })}
       </div>
-
-      {items && items.some((r) => r.id < 0) && (
-        <p className="hint">
-          ※ 목 선점·결제로 만든 예약은 브라우저 새로고침 시 사라집니다 (백엔드 구현 후 실제
-          데이터로 유지됩니다).
-        </p>
-      )}
 
       {cancelTarget && (
         <>

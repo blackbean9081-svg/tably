@@ -20,6 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -42,6 +44,7 @@ public class WaitingService {
     private final RestaurantRepository restaurantRepository;
     private final MemberRepository memberRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final WaitingRankIndex rankIndex;
 
     /**
      * 핵심영역 6 — 식당별 카운터 행 + 비관적 락 (접근 a).
@@ -80,11 +83,14 @@ public class WaitingService {
                 .waitingNo(waitingNo)
                 .status(WaitingStatus.WAITING)
                 .build());
+        // 인덱스 반영은 커밋 후 — 롤백된 등록이 유령 멤버로 남아 남의 앞 팀 수를 부풀리지 않게
+        afterCommit(() -> rankIndex.add(restaurant.getId(), waiting.getId(), waitingNo));
         return WaitingResponseDto.of(waiting, aheadCount(waiting));
     }
 
     /**
-     * FR-15: 순번 조회 — 모두가 계속 새로고침하는 지점이라 count 쿼리 하나로 가볍게.
+     * FR-15: 순번 조회 — 모두가 계속 새로고침하는 지점.
+     * 1막은 count 쿼리, 2막(rank-mode=redis)은 Sorted Set 인덱스가 답하고 유실 시 DB로 폴백한다.
      */
     public WaitingResponseDto getMyWaiting(Long memberId, Long waitingId) {
         Waiting waiting = waitingRepository.findById(waitingId)
@@ -92,7 +98,11 @@ public class WaitingService {
         if (!waiting.isOwnedBy(memberId)) {
             throw new BusinessException(ErrorCode.NOT_WAITING_OWNER);
         }
-        return WaitingResponseDto.of(waiting, aheadCount(waiting));
+        long ahead = waiting.getStatus() == WaitingStatus.WAITING
+                ? rankIndex.aheadCount(waiting.getRestaurant().getId(), waiting.getId(), waiting.getWaitingNo())
+                        .orElseGet(() -> aheadCount(waiting))
+                : aheadCount(waiting);
+        return WaitingResponseDto.of(waiting, ahead);
     }
 
     /**
@@ -109,11 +119,44 @@ public class WaitingService {
                 .findFirstByRestaurantIdAndStatusOrderByWaitingNoAsc(restaurantId, WaitingStatus.WAITING)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NO_WAITING_TO_CALL));
         next.call(LocalDateTime.now());
+        // CALLED는 대기(WAITING) 집합에서 빠진다 — 뒤 팀들의 앞 팀 수가 즉시 줄어든다
+        afterCommit(() -> rankIndex.remove(restaurantId, next.getId()));
         eventPublisher.publishEvent(NotificationEvent.of(next.getMember().getId(),
                 NotificationType.WAITING_CALLED,
                 "%s 입장 순서입니다 (대기 %d번). 10분 내 도착을 확인해주세요.".formatted(
                         restaurant.getName(), next.getWaitingNo())));
         return WaitingResponseDto.of(next, 0L);
+    }
+
+    @Transactional
+    public WaitingResponseDto seat(Long ownerId, Long waitingId) {
+        Waiting waiting = waitingRepository.findById(waitingId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WAITING_NOT_FOUND));
+        if (!waiting.getRestaurant().isOwnedBy(ownerId)) {
+            throw new BusinessException(ErrorCode.NOT_RESTAURANT_OWNER);
+        }
+        boolean seated = waitingRepository.updateStatusIfCurrentIn(
+                waitingId, List.of(WaitingStatus.CALLED), WaitingStatus.SEATED) == 1;
+        if (!seated) {
+            throw new BusinessException(ErrorCode.WAITING_NOT_CALLED);
+        }
+        return WaitingResponseDto.of(waitingRepository.findById(waitingId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WAITING_NOT_FOUND)), 0L);
+    }
+
+    @Transactional
+    public void cancel(Long memberId, Long waitingId) {
+        Waiting waiting = waitingRepository.findById(waitingId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WAITING_NOT_FOUND));
+        if (!waiting.isOwnedBy(memberId)) {
+            throw new BusinessException(ErrorCode.NOT_WAITING_OWNER);
+        }
+        boolean canceled = waitingRepository.updateStatusIfCurrentIn(
+                waitingId, ACTIVE_STATUSES, WaitingStatus.CANCELED) == 1;
+        if (!canceled) {
+            throw new BusinessException(ErrorCode.WAITING_ALREADY_CLOSED);
+        }
+        afterCommit(() -> rankIndex.remove(waiting.getRestaurant().getId(), waitingId));
     }
 
     /**
@@ -122,17 +165,30 @@ public class WaitingService {
     @Transactional
     public int expireOverdueCalls() {
         LocalDateTime threshold = LocalDateTime.now().minus(CALL_TIMEOUT);
-        List<Waiting> overdue = waitingRepository
-                .findAllByStatusAndCalledAtBefore(WaitingStatus.CALLED, threshold);
-        overdue.forEach(Waiting::expire);
-        if (!overdue.isEmpty()) {
-            log.info("호출 만료 처리 {}건", overdue.size());
+        int expired = waitingRepository.updateStatusAllCalledBefore(
+                WaitingStatus.CALLED, threshold, WaitingStatus.EXPIRED);
+        if (expired > 0) {
+            log.info("호출 만료 처리 {}건", expired);
         }
-        return overdue.size();
+        return expired;
     }
 
     private Long aheadCount(Waiting waiting) {
         return waitingRepository.countByRestaurantIdAndStatusAndWaitingNoLessThan(
                 waiting.getRestaurant().getId(), WaitingStatus.WAITING, waiting.getWaitingNo());
+    }
+
+    // 인덱스 갱신은 커밋 후에만 — 롤백된 변경이 읽기 모델에 반영되면 DB(진실 원천)와 어긋난다
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 }

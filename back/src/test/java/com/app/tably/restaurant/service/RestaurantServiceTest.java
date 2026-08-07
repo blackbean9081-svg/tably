@@ -52,7 +52,7 @@ class RestaurantServiceTest {
     }
 
     private PolicyRequestDto policyRequest() {
-        return new PolicyRequestDto(20000, "7:100,3:50,1:0", "MONTHLY:1:10:00", 4, "18:00,20:30");
+        return new PolicyRequestDto(20000, "7:100,3:50,1:0", "MONTHLY:1:10:00", 4, "18:00,20:30", "MONDAY");
     }
 
     @Test

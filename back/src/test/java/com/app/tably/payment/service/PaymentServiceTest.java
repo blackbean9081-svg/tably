@@ -461,6 +461,45 @@ class PaymentServiceTest {
         assertThat(refund.getStatus()).isEqualTo(PaymentStatus.FAILED);
     }
 
+    // ── 환불액 사전 고지 (S4) ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("사전 고지 — 결제 완료 예약은 취소 확정과 같은 계산기의 환불율·환불액을 반환한다")
+    void previewRefund_confirmed() {
+        Reservation reservation = reservation(1L, ReservationStatus.CONFIRMED, LocalDateTime.now());
+        stubPolicyLookup();
+        given(paymentRepository.findFirstByReservationIdAndTypeAndStatusOrderByIdDesc(
+                100L, PaymentType.PAY, PaymentStatus.APPROVED))
+                .willReturn(Optional.of(approvedPay(reservation, "key-1")));
+        given(refundCalculator.rate(anyString(), any(), any(), any())).willReturn(50);
+        given(refundCalculator.calculate(anyString(), any(), any(), anyInt(), any())).willReturn(20000);
+
+        var preview = paymentService.previewRefund(reservation);
+
+        assertThat(preview.cancelable()).isTrue();
+        assertThat(preview.paidAmount()).isEqualTo(40000);
+        assertThat(preview.refundRate()).isEqualTo(50);
+        assertThat(preview.refundAmount()).isEqualTo(20000);
+        assertThat(preview.refundRule()).isEqualTo("7:100,3:50,1:0");
+    }
+
+    @Test
+    @DisplayName("사전 고지 — 결제 전(PENDING_PAYMENT)은 결제액·환불액 0원, 취소 불가로 응답한다")
+    void previewRefund_beforePayment() {
+        Reservation reservation = pendingReservation(1L);
+        stubPolicyLookup();
+        given(paymentRepository.findFirstByReservationIdAndTypeAndStatusOrderByIdDesc(
+                100L, PaymentType.PAY, PaymentStatus.APPROVED)).willReturn(Optional.empty());
+        given(refundCalculator.rate(anyString(), any(), any(), any())).willReturn(100);
+        given(refundCalculator.calculate(anyString(), any(), any(), anyInt(), any())).willReturn(0);
+
+        var preview = paymentService.previewRefund(reservation);
+
+        assertThat(preview.cancelable()).isFalse();
+        assertThat(preview.paidAmount()).isZero();
+        assertThat(preview.refundAmount()).isZero();
+    }
+
     // ── 조회 ─────────────────────────────────────────────────────────────
 
     @Test

@@ -70,6 +70,7 @@ public class DataInitializer implements CommandLineRunner {
                 .openRule("MONTHLY:1:10:00")
                 .tablesPerTime(4)
                 .slotTimes("18:00,20:30")
+                .closedDays("MONDAY")
                 .build());
 
         Restaurant bistro = restaurantRepository.save(Restaurant.builder()

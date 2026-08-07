@@ -3,6 +3,7 @@ package com.app.tably.reservation.controller;
 import com.app.tably.common.response.ApiResponse;
 import com.app.tably.reservation.dto.AppealRequestDto;
 import com.app.tably.reservation.dto.AppealResponseDto;
+import com.app.tably.reservation.dto.RefundPreviewResponseDto;
 import com.app.tably.reservation.dto.ReservationHoldRequestDto;
 import com.app.tably.reservation.dto.ReservationResponseDto;
 import com.app.tably.reservation.service.ReservationService;
@@ -38,6 +39,14 @@ public class ReservationController {
     public ApiResponse<ReservationResponseDto> getReservation(Authentication authentication,
                                                               @PathVariable Long reservationId) {
         return ApiResponse.ok(reservationService.getReservation(
+                (Long) authentication.getPrincipal(), reservationId));
+    }
+
+    // S4: 취소 확인 화면의 환불액 사전 고지 — 취소 확정과 같은 계산 경로의 서버 응답을 근거로 쓴다
+    @GetMapping("/{reservationId}/refund-preview")
+    public ApiResponse<RefundPreviewResponseDto> getRefundPreview(Authentication authentication,
+                                                                  @PathVariable Long reservationId) {
+        return ApiResponse.ok(reservationService.getRefundPreview(
                 (Long) authentication.getPrincipal(), reservationId));
     }
 
