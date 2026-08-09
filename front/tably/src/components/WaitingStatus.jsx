@@ -87,13 +87,6 @@ export default function WaitingStatus({ waiting, onUpdate, onRestart }) {
       )}
       {status === 'SEATED' && <div className="banner success">입장 처리되었습니다. 맛있게 드세요!</div>}
       {status === 'CANCELED' && <div className="banner error">대기가 취소되었습니다.</div>}
-
-      {id < 0 && (
-        <p className="hint">
-          ※ 웨이팅 등록이 백엔드 미구현(핵심영역 6)이라 목 응답으로 동작 중입니다. 백엔드 구현
-          시 자동으로 실제 API로 전환됩니다.
-        </p>
-      )}
     </div>
   )
 }
